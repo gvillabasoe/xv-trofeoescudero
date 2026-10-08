@@ -1,0 +1,1053 @@
+// Trofeo Escudero · Esquema de datos (Entrega 2 · migración 0001_inicial)
+//
+// Fuente: fase-2/arquitectura-tecnica.md §6.
+// - Las tablas relacionales son la fuente de verdad editable; el snapshot publicado se deriva de ellas.
+// - Ids de texto (cuid2), salvo los singletons, que usan id = 1.
+// - Fechas en timestamptz.
+// - Toda entidad editable lleva `version` (control optimista), `createdAt`, `updatedAt` y `updatedById` (→ User, SetNull).
+// - Lo que Prisma no puede expresar (CHECK y el trigger append-only de AuditLog) está escrito a mano al final de la
+//   migración 0001_inicial. CI comprueba en cada subida que migraciones y esquema coinciden.
+// - La URL de conexión no va aquí: Prisma 7 la lee de prisma.config.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Marcador de entorno de la base de datos (PolicySettings.environment).
+enum DataEnvironment {
+  NONPROD
+  PROD
+}
+
+enum AuditAction {
+  ALTA_INICIAL
+  INICIO_SESION
+  INICIO_SESION_FALLIDO
+  CIERRE_SESION
+  TOTP_ACTIVADO
+  TOTP_RESTABLECIDO
+  CODIGOS_RECUPERACION_REGENERADOS
+  SESION_REVOCADA
+  EMERGENCIA_USADA
+  USUARIO_CREADO
+  USUARIO_BLOQUEADO
+  USUARIO_ELIMINADO
+  CONTENIDO_GUARDADO
+  PUBLICACION
+  RESTAURACION
+  MEDIO_SUBIDO
+  MEDIO_REVISADO
+  MEDIO_RETIRADO
+  MEDIO_PURGADO
+  PATROCINADOR_GUARDADO
+  PATROCINADOR_ARCHIVADO
+  PROPUESTA_ESTADO
+  PROPUESTA_NOTA
+  PROPUESTA_ARCHIVADA
+  PROPUESTA_ANONIMIZADA
+  PROPUESTA_ELIMINADA
+  EXPORTACION_CSV
+  CONFIGURACION_GUARDADA
+  RETENCION_EJECUTADA
+  RESET_NO_PRODUCTIVO
+}
+
+/// Los 5 bloques principales de la landing.
+enum SectionKey {
+  HERO
+  FAMILIA
+  EL_DIA
+  COLABORAR
+  CIERRE
+}
+
+enum FamilyGeneration {
+  PRIMERA
+  SEGUNDA
+  TERCERA
+}
+
+enum ContactChannelType {
+  EMAIL
+  TELEFONO
+  WHATSAPP
+  INSTAGRAM
+  LINKEDIN
+  WEB
+  OTRO
+}
+
+/// Las 4 vías de colaboración.
+enum RouteKey {
+  PECHO
+  BOLSA
+  JUEGO
+  DESPUES
+}
+
+enum RouteItemKind {
+  NECESITAMOS
+  PUEDES_APORTAR
+  RECIBES
+  CONDICION
+  EJEMPLO
+}
+
+/// Las 6 opciones de «¿Dónde encaja tu marca?» del formulario.
+enum CollaborationType {
+  PATROCINADOR_PRINCIPAL_POLO
+  WELCOME_PACK
+  PREMIO_CONCURSO
+  HOYO
+  SORTEO_EXPERIENCIA
+  OTRA
+}
+
+/// Estado comercial: solo en administración (se publica únicamente con showStatusPublicly).
+enum OpportunityAvailability {
+  DISPONIBLE
+  RESERVADO
+  CERRADO
+}
+
+enum HoleContestType {
+  BOLA_MAS_CERCANA
+  DRIVE_MAS_LARGO
+}
+
+enum GolfCourse {
+  NORTE
+  SUR
+  AMBOS
+}
+
+enum SponsorRelationshipType {
+  PATROCINADOR
+  COLABORADOR
+  PATROCINADOR_O_COLABORADOR
+  COLABORACION_SOLIDARIA
+}
+
+enum SponsorTemporalRelation {
+  HISTORICO
+  ACTUAL
+}
+
+enum SponsorSource {
+  INFO_V3
+  GUION
+  ORGANIZACION
+  OTRA
+}
+
+enum LogoPermission {
+  PENDIENTE
+  AUTORIZADO
+  DENEGADO
+  NO_APLICA
+}
+
+enum LegalReviewStatus {
+  NO_REQUERIDA
+  PENDIENTE
+  APROBADA
+  RECHAZADA
+}
+
+enum SponsorLifecycle {
+  ACTIVO
+  ARCHIVADO
+}
+
+enum MediaKind {
+  FOTO
+  LOGO
+  ILUSTRACION
+}
+
+enum MediaReviewState {
+  SUBIDA
+  EN_REVISION
+  AUTORIZADA
+  PUBLICADA
+  RETIRADA
+}
+
+enum MediaRetiredReason {
+  SUSTITUIDA
+  CONSENTIMIENTO_RETIRADO
+  PERMISO_LOGO
+  JURIDICO
+  OTRO
+}
+
+enum MediaFormat {
+  WEBP
+  AVIF
+  PNG
+  JPEG
+}
+
+enum MediaSlot {
+  HERO_IMAGEN
+  FAMILIA_IMAGEN
+  MIEMBRO_FOTO
+  DIA_IMAGEN
+  VIA_IMAGEN
+  PATROCINADOR_LOGO
+  CIERRE_IMAGEN
+  OG_IMAGEN
+}
+
+enum SubmissionStatus {
+  NUEVA
+  REVISADA
+  CONTACTADA
+  EN_CONVERSACION
+  CERRADA
+  DESCARTADA
+}
+
+enum AbuseAction {
+  FORM
+  SETUP
+  BREAKGLASS
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sistema · Better Auth (identidad canónica; sin tabla AdminUser duplicada)
+// Campos según Better Auth 1.7.7 (núcleo + plugins admin y twoFactor + rate limit en base de datos).
+// Better Auth genera sus propios ids, por eso estas tablas no tienen valor por defecto en `id`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id               String    @id
+  name             String
+  email            String    @unique
+  emailVerified    Boolean   @default(false)
+  image            String?
+  createdAt        DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
+  /// Plugin admin: «admin»; «editor» queda reservado.
+  role             String?
+  banned           Boolean?  @default(false)
+  banReason        String?
+  banExpires       DateTime? @db.Timestamptz(3)
+  /// Plugin twoFactor. El CMS exige true.
+  twoFactorEnabled Boolean?  @default(false)
+
+  sessions     Session[]
+  accounts     Account[]
+  twoFactors   TwoFactor[]
+  adminProfile AdminProfile?
+
+  auditLogs                      AuditLog[]                @relation("AuditLogActor")
+  createdRevisions               ContentRevision[]         @relation("ContentRevisionCreatedBy")
+  lastPublishedSiteStates        SiteState[]               @relation("SiteStateLastPublishedBy")
+  uploadedMedia                  MediaAsset[]              @relation("MediaAssetUploadedBy")
+  consentConfirmedMedia          MediaAsset[]              @relation("MediaAssetConsentConfirmedBy")
+  submissionStatusChanges        SubmissionStatusHistory[] @relation("SubmissionStatusChangedBy")
+  authoredSubmissionNotes        SubmissionNote[]          @relation("SubmissionNoteAuthor")
+  updatedPolicySettings          PolicySettings[]          @relation("PolicySettingsUpdatedBy")
+  updatedSiteSettings            SiteSettings[]            @relation("SiteSettingsUpdatedBy")
+  updatedContactChannels         ContactChannel[]          @relation("ContactChannelUpdatedBy")
+  updatedPageSections            PageSection[]             @relation("PageSectionUpdatedBy")
+  updatedHeroContents            HeroContent[]             @relation("HeroContentUpdatedBy")
+  updatedHeroFigures             HeroFigure[]              @relation("HeroFigureUpdatedBy")
+  updatedFamilyContents          FamilyContent[]           @relation("FamilyContentUpdatedBy")
+  updatedFamilyMembers           FamilyMember[]            @relation("FamilyMemberUpdatedBy")
+  updatedDayContents             DayContent[]              @relation("DayContentUpdatedBy")
+  updatedDaySteps                DayStep[]                 @relation("DayStepUpdatedBy")
+  updatedCollaborationContents   CollaborationContent[]    @relation("CollaborationContentUpdatedBy")
+  updatedClosingContents         ClosingContent[]          @relation("ClosingContentUpdatedBy")
+  updatedLegalPages              LegalPage[]               @relation("LegalPageUpdatedBy")
+  updatedCollaborationRoutes     CollaborationRoute[]      @relation("CollaborationRouteUpdatedBy")
+  updatedRouteItems              RouteItem[]               @relation("RouteItemUpdatedBy")
+  updatedOpportunities           Opportunity[]             @relation("OpportunityUpdatedBy")
+  updatedCompetitionHoles        CompetitionHole[]         @relation("CompetitionHoleUpdatedBy")
+  updatedSponsorCategories       SponsorCategory[]         @relation("SponsorCategoryUpdatedBy")
+  updatedSponsors                Sponsor[]                 @relation("SponsorUpdatedBy")
+  updatedMedia                   MediaAsset[]              @relation("MediaAssetUpdatedBy")
+  updatedSubmissions             Submission[]              @relation("SubmissionUpdatedBy")
+  updatedSubmissionNotes         SubmissionNote[]          @relation("SubmissionNoteUpdatedBy")
+}
+
+/// IP y user agent: solo seguridad; nunca se copian a AuditLog (§16.1).
+model Session {
+  id             String   @id
+  expiresAt      DateTime @db.Timestamptz(3)
+  token          String   @unique
+  createdAt      DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+  ipAddress      String?
+  userAgent      String?
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Plugin admin
+  impersonatedBy String?
+
+  @@index([userId])
+}
+
+/// `password` guarda el hash scrypt de Better Auth.
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime? @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @db.Timestamptz(3)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @default(now()) @updatedAt @db.Timestamptz(3)
+
+  @@index([identifier])
+}
+
+/// Plugin twoFactor: secreto TOTP y códigos de recuperación, cifrados por Better Auth.
+model TwoFactor {
+  id                      String    @id
+  secret                  String
+  backupCodes             String
+  userId                  String
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified                Boolean?  @default(true)
+  failedVerificationCount Int?      @default(0)
+  lockedUntil             DateTime? @db.Timestamptz(3)
+
+  @@index([secret])
+  @@index([userId])
+}
+
+/// Rate limiting de Better Auth en base de datos.
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sistema · propio
+// ─────────────────────────────────────────────────────────────────────────────
+
+model AdminProfile {
+  id          String    @id @default(cuid(2))
+  userId      String    @unique
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayName String?
+  /// Pequeño y sin datos sensibles.
+  preferences Json?
+  lastSeenAt  DateTime? @db.Timestamptz(3)
+  createdAt   DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
+}
+
+/// Singleton (id = 1): versión publicada vigente.
+model SiteState {
+  id                    Int              @id @default(1)
+  publishedRevisionId   String?
+  publishedRevision     ContentRevision? @relation(fields: [publishedRevisionId], references: [id], onDelete: Restrict)
+  hasUnpublishedChanges Boolean          @default(false)
+  lastPublishedAt       DateTime?        @db.Timestamptz(3)
+  lastPublishedById     String?
+  lastPublishedBy       User?            @relation("SiteStateLastPublishedBy", fields: [lastPublishedById], references: [id], onDelete: SetNull)
+  version               Int              @default(1)
+  createdAt             DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime         @default(now()) @updatedAt @db.Timestamptz(3)
+}
+
+/// Inmutable: el snapshot solo contiene lo público, validado con Zod.
+model ContentRevision {
+  id               String             @id @default(cuid(2))
+  revisionNumber   Int                @unique
+  schemaVersion    Int
+  /// SHA-256 del JSON canónico.
+  contentHash      String
+  snapshot         Json
+  createdById      String?
+  createdBy        User?              @relation("ContentRevisionCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt        DateTime           @default(now()) @db.Timestamptz(3)
+  publishedAt      DateTime           @db.Timestamptz(3)
+  /// Relleno cuando la revisión es una restauración.
+  sourceRevisionId String?
+  sourceRevision   ContentRevision?   @relation("ContentRevisionSource", fields: [sourceRevisionId], references: [id], onDelete: SetNull)
+  restorations     ContentRevision[]  @relation("ContentRevisionSource")
+  publishComment   String?
+  mediaRefs        RevisionMediaRef[]
+  siteStates       SiteState[]
+
+  @@index([createdAt(sort: Desc)])
+}
+
+/// Impide borrar un medio mientras alguna revisión retenida lo use.
+model RevisionMediaRef {
+  revisionId String
+  revision   ContentRevision @relation(fields: [revisionId], references: [id], onDelete: Cascade)
+  mediaId    String
+  media      MediaAsset      @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+
+  @@id([revisionId, mediaId])
+  @@index([mediaId])
+}
+
+/// Singleton (id = 1). `environment` se fija al crear cada base de datos y el build lo comprueba.
+model PolicySettings {
+  id                        Int             @id @default(1)
+  environment               DataEnvironment
+  /// Propuesta pendiente de validación legal; configurable.
+  submissionAnonymizeMonths Int             @default(24)
+  /// Máximo 30 (CHECK en SQL).
+  fingerprintMaxDays        Int             @default(30)
+  auditRetentionMonths      Int             @default(24)
+  revisionsToKeep           Int             @default(50)
+  retiredMediaPurgeDays     Int             @default(30)
+  /// En PROD no se puede desactivar (CHECK en SQL).
+  requireTotp               Boolean         @default(true)
+  version                   Int             @default(1)
+  createdAt                 DateTime        @default(now()) @db.Timestamptz(3)
+  updatedAt                 DateTime        @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById               String?
+  updatedBy                 User?           @relation("PolicySettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Append-only (trigger en SQL). Nunca guarda contraseñas, tokens, mensajes completos, emails, teléfonos ni IP.
+model AuditLog {
+  id         String      @id @default(cuid(2))
+  at         DateTime    @default(now()) @db.Timestamptz(3)
+  actorId    String?
+  actor      User?       @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+  action     AuditAction
+  entityType String
+  entityId   String?
+  requestId  String?
+  /// Resumen no sensible.
+  summary    String?
+
+  @@index([at])
+  @@index([entityType, entityId])
+  @@index([action, at])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Editorial (borrador editable → snapshot)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Singleton (id = 1). Los datos del titular legal quedan vacíos hasta P2.
+model SiteSettings {
+  id                Int          @id @default(1)
+  siteName          String
+  editionLabel      String
+  editionNumber     Int
+  eventDate         DateTime     @db.Date
+  venueName         String
+  location          String
+  afterPartyName    String?
+  seoTitle          String
+  seoDescription    String
+  legalOwnerName    String?
+  legalOwnerTaxId   String?
+  legalOwnerAddress String?
+  /// Imagen OG, vía MediaUsage.
+  mediaUsages       MediaUsage[]
+  version           Int          @default(1)
+  createdAt         DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById       String?
+  updatedBy         User?        @relation("SiteSettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Solo se publica si está activo (apagado por defecto).
+model ContactChannel {
+  id            String             @id @default(cuid(2))
+  type          ContactChannelType
+  label         String
+  value         String
+  url           String?
+  isActive      Boolean            @default(false)
+  showInClosing Boolean            @default(false)
+  showInFooter  Boolean            @default(false)
+  sortOrder     Int                @default(0)
+  version       Int                @default(1)
+  createdAt     DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime           @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById   String?
+  updatedBy     User?              @relation("ContactChannelUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([type, value])
+}
+
+/// Los 5 bloques fijos. HERO y COLABORAR no se pueden ocultar (CHECK en SQL).
+model PageSection {
+  id            String                @id @default(cuid(2))
+  key           SectionKey            @unique
+  indexLabel    String
+  isVisible     Boolean               @default(true)
+  sortOrder     Int
+  hero          HeroContent?
+  family        FamilyContent?
+  day           DayContent?
+  collaboration CollaborationContent?
+  closing       ClosingContent?
+  version       Int                   @default(1)
+  createdAt     DateTime              @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime              @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById   String?
+  updatedBy     User?                 @relation("PageSectionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+model HeroContent {
+  id                 String       @id @default(cuid(2))
+  sectionId          String       @unique
+  section            PageSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  eyebrow            String
+  titleLine1         String
+  titleLine2         String?
+  lead               String
+  primaryCtaLabel    String
+  secondaryCtaLabel  String
+  brandCardTitle     String
+  brandCardText      String
+  brandCardLinkLabel String
+  figures            HeroFigure[]
+  mediaUsages        MediaUsage[]
+  version            Int          @default(1)
+  createdAt          DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById        String?
+  updatedBy          User?        @relation("HeroContentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Franja de cifras. `internalSource` es privado y nunca entra en el snapshot.
+model HeroFigure {
+  id             String      @id @default(cuid(2))
+  heroId         String
+  hero           HeroContent @relation(fields: [heroId], references: [id], onDelete: Cascade)
+  label          String
+  value          String
+  caption        String?
+  isVisible      Boolean     @default(true)
+  sortOrder      Int
+  internalSource String?
+  version        Int         @default(1)
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime    @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById    String?
+  updatedBy      User?       @relation("HeroFigureUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([heroId, sortOrder])
+}
+
+model FamilyContent {
+  id                     String         @id @default(cuid(2))
+  sectionId              String         @unique
+  section                PageSection    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  title                  String
+  secondGenerationLabel  String
+  secondGenerationText   String
+  thirdGenerationLabel   String
+  thirdGenerationText    String
+  thirdGenerationCaption String?
+  members                FamilyMember[]
+  mediaUsages            MediaUsage[]
+  version                Int            @default(1)
+  createdAt              DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime       @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById            String?
+  updatedBy              User?          @relation("FamilyContentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// `ageManual`: campo editorial opcional; oculto si está vacío. Sin cálculo automático ni fecha de nacimiento.
+model FamilyMember {
+  id          String           @id @default(cuid(2))
+  familyId    String
+  family      FamilyContent    @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  name        String
+  generation  FamilyGeneration
+  text        String
+  caption     String?
+  ageManual   Int?
+  isVisible   Boolean          @default(true)
+  sortOrder   Int
+  mediaUsages MediaUsage[]
+  version     Int              @default(1)
+  createdAt   DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime         @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById String?
+  updatedBy   User?            @relation("FamilyMemberUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([familyId, sortOrder])
+}
+
+/// El día + 3ª Generación: textos de Norte, Sur y Luz de Mar.
+model DayContent {
+  id             String       @id @default(cuid(2))
+  sectionId      String       @unique
+  section        PageSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  title          String
+  lead           String
+  northLabel     String
+  northTitle     String
+  northText      String
+  northHighlight String?
+  northBridge    String?
+  southLabel     String
+  southTitle     String
+  southText      String
+  afterLabel     String
+  afterTitle     String
+  afterText      String
+  steps          DayStep[]
+  mediaUsages    MediaUsage[]
+  version        Int          @default(1)
+  createdAt      DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById    String?
+  updatedBy      User?        @relation("DayContentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Pasos del recorrido. `time` es opcional (P7) y se oculta si está vacía.
+model DayStep {
+  id          String     @id @default(cuid(2))
+  dayId       String
+  day         DayContent @relation(fields: [dayId], references: [id], onDelete: Cascade)
+  label       String
+  time        String?
+  isVisible   Boolean    @default(true)
+  sortOrder   Int
+  version     Int        @default(1)
+  createdAt   DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime   @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById String?
+  updatedBy   User?      @relation("DayStepUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([dayId, sortOrder])
+}
+
+/// Cabecera de Colaborar, los hoyos con concurso, los 18 hoyos y la nota de transparencia.
+/// Añadido en la Entrega 2: el §6 no tenía dónde guardar estos textos.
+model CollaborationContent {
+  id               String      @id @default(cuid(2))
+  sectionId        String      @unique
+  section          PageSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  titleLine1       String
+  titleLine2       String?
+  lead             String
+  closingLine      String?
+  holesLabel       String
+  holesTitle       String
+  holesLead        String
+  holesModelsText  String?
+  holesNamingText  String?
+  holesCtaLabel    String
+  allHolesTitle    String
+  allHolesText     String
+  transparencyNote String
+  version          Int         @default(1)
+  createdAt        DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime    @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById      String?
+  updatedBy        User?       @relation("CollaborationContentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Histórico, dalecandELA y cierre.
+model ClosingContent {
+  id                String       @id @default(cuid(2))
+  sectionId         String       @unique
+  section           PageSection  @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  historyTitle      String
+  historyText       String
+  wallLabel         String
+  charityTitle      String
+  charityText       String
+  charityVisible    Boolean      @default(false)
+  closingTitleLine1 String
+  closingTitleLine2 String?
+  closingText       String
+  closingMicrocopy  String?
+  closingCtaLabel   String
+  mediaUsages       MediaUsage[]
+  version           Int          @default(1)
+  createdAt         DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt         DateTime     @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById       String?
+  updatedBy         User?        @relation("ClosingContentUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// privacidad · aviso-legal
+model LegalPage {
+  id          String         @id @default(cuid(2))
+  slug        String         @unique
+  title       String
+  /// Markdown limitado.
+  body        String
+  isComplete  Boolean        @default(false)
+  versions    LegalVersion[]
+  version     Int            @default(1)
+  createdAt   DateTime       @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime       @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById String?
+  updatedBy   User?          @relation("LegalPageUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Inmutable: cada propuesta guarda la versión exacta que se aceptó.
+model LegalVersion {
+  id           String       @id @default(cuid(2))
+  legalPageId  String
+  legalPage    LegalPage    @relation(fields: [legalPageId], references: [id], onDelete: Restrict)
+  versionLabel String
+  bodyHash     String
+  body         String
+  publishedAt  DateTime     @db.Timestamptz(3)
+  createdAt    DateTime     @default(now()) @db.Timestamptz(3)
+  submissions  Submission[]
+
+  @@unique([legalPageId, versionLabel])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Comercial
+// ─────────────────────────────────────────────────────────────────────────────
+
+model CollaborationRoute {
+  id            String            @id @default(cuid(2))
+  key           RouteKey          @unique
+  number        Int
+  title         String
+  subtitle      String
+  cardCopy      String
+  ctaLabel      String
+  /// Tipo preseleccionado en el formulario.
+  formType      CollaborationType
+  isVisible     Boolean           @default(true)
+  sortOrder     Int
+  items         RouteItem[]
+  opportunities Opportunity[]
+  mediaUsages   MediaUsage[]
+  version       Int               @default(1)
+  createdAt     DateTime          @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime          @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById   String?
+  updatedBy     User?             @relation("CollaborationRouteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+model RouteItem {
+  id          String             @id @default(cuid(2))
+  routeId     String
+  route       CollaborationRoute @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  kind        RouteItemKind
+  text        String
+  sortOrder   Int
+  version     Int                @default(1)
+  createdAt   DateTime           @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime           @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById String?
+  updatedBy   User?              @relation("RouteItemUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([routeId, kind, sortOrder])
+}
+
+/// `availability` y `internalNotes` son privados. El estado solo se publica con showStatusPublicly (apagado).
+model Opportunity {
+  id                 String                  @id @default(cuid(2))
+  key                String                  @unique
+  routeId            String
+  route              CollaborationRoute      @relation(fields: [routeId], references: [id], onDelete: Restrict)
+  holeId             String?
+  hole               CompetitionHole?        @relation(fields: [holeId], references: [id], onDelete: SetNull)
+  name               String
+  publicDescription  String?
+  maxSponsors        Int?
+  availability       OpportunityAvailability @default(DISPONIBLE)
+  showStatusPublicly Boolean                 @default(false)
+  internalNotes      String?
+  isVisible          Boolean                 @default(true)
+  sortOrder          Int
+  version            Int                     @default(1)
+  createdAt          DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime                @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById        String?
+  updatedBy          User?                   @relation("OpportunityUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([routeId, sortOrder])
+  @@index([availability])
+}
+
+/// 18 hoyos (CHECK 1–18 en SQL). El campo (P8) está oculto mientras no se confirme.
+model CompetitionHole {
+  id               String           @id @default(cuid(2))
+  number           Int              @unique
+  contestType      HoleContestType?
+  par              Int?
+  course           GolfCourse?
+  showCourse       Boolean          @default(false)
+  isContestVisible Boolean          @default(true)
+  opportunities    Opportunity[]
+  version          Int              @default(1)
+  createdAt        DateTime         @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime         @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById      String?
+  updatedBy        User?            @relation("CompetitionHoleUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+model SponsorCategory {
+  id                  String    @id @default(cuid(2))
+  name                String    @unique
+  slug                String    @unique
+  requiresLegalReview Boolean   @default(false)
+  sortOrder           Int       @default(0)
+  sponsors            Sponsor[]
+  version             Int       @default(1)
+  createdAt           DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt           DateTime  @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById         String?
+  updatedBy           User?     @relation("SponsorCategoryUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// Solo se publica si: confirmed ∧ publicVisibility ∧ lifecycle = ACTIVO ∧ legalReview ∈ {NO_REQUERIDA, APROBADA}.
+/// No existe ningún estado de «posible patrocinador». Se archiva, no se borra.
+model Sponsor {
+  id               String                  @id @default(cuid(2))
+  name             String
+  slug             String                  @unique
+  relationshipType SponsorRelationshipType
+  temporalRelation SponsorTemporalRelation
+  confirmed        Boolean                 @default(false)
+  source           SponsorSource
+  sourceNote       String?
+  categoryId       String
+  category         SponsorCategory         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  /// Interruptor independiente del hecho histórico.
+  publicVisibility Boolean                 @default(false)
+  logoPermission   LogoPermission          @default(PENDIENTE)
+  legalReview      LegalReviewStatus       @default(PENDIENTE)
+  sortOrder        Int                     @default(0)
+  lifecycle        SponsorLifecycle        @default(ACTIVO)
+  url              String?
+  shortDescription String?
+  mediaUsages      MediaUsage[]
+  version          Int                     @default(1)
+  createdAt        DateTime                @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime                @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById      String?
+  updatedBy        User?                   @relation("SponsorUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([temporalRelation, lifecycle, sortOrder])
+  @@index([categoryId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Medios
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Privado hasta su publicación. Sensible si aparecen personas. Punto focal entre 0 y 1 (CHECK en SQL).
+model MediaAsset {
+  id                       String              @id @default(cuid(2))
+  kind                     MediaKind
+  reviewState              MediaReviewState    @default(SUBIDA)
+  privatePathname          String
+  /// Detectado por el contenido real del archivo.
+  sourceMime               String
+  sizeBytes                Int
+  width                    Int
+  height                   Int
+  megapixels               Float
+  sha256                   String              @unique
+  /// Obligatorio para publicar.
+  altText                  String?
+  caption                  String?
+  description              String?
+  focalX                   Float               @default(0.5)
+  focalY                   Float               @default(0.5)
+  hasIdentifiablePeople    Boolean             @default(false)
+  includesMinors           Boolean             @default(false)
+  consentConfirmed         Boolean             @default(false)
+  guardianConsentConfirmed Boolean             @default(false)
+  consentConfirmedAt       DateTime?           @db.Timestamptz(3)
+  consentConfirmedById     String?
+  consentConfirmedBy       User?               @relation("MediaAssetConsentConfirmedBy", fields: [consentConfirmedById], references: [id], onDelete: SetNull)
+  retiredAt                DateTime?           @db.Timestamptz(3)
+  retiredReason            MediaRetiredReason?
+  uploadedById             String?
+  uploadedBy               User?               @relation("MediaAssetUploadedBy", fields: [uploadedById], references: [id], onDelete: SetNull)
+  variants                 MediaVariant[]
+  usages                   MediaUsage[]
+  revisionRefs             RevisionMediaRef[]
+  version                  Int                 @default(1)
+  createdAt                DateTime            @default(now()) @db.Timestamptz(3)
+  updatedAt                DateTime            @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById              String?
+  updatedBy                User?               @relation("MediaAssetUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+}
+
+/// `publicPathname` es inmutable y versionado (incluye el hash).
+model MediaVariant {
+  id             String      @id @default(cuid(2))
+  mediaId        String
+  media          MediaAsset  @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  format         MediaFormat
+  width          Int
+  publicPathname String      @unique
+  publicUrl      String
+  sizeBytes      Int
+  createdAt      DateTime    @default(now()) @db.Timestamptz(3)
+
+  @@unique([mediaId, format, width])
+}
+
+/// Exactamente una FK de destino no nula (CHECK en SQL).
+model MediaUsage {
+  id               String              @id @default(cuid(2))
+  mediaId          String
+  media            MediaAsset          @relation(fields: [mediaId], references: [id], onDelete: Restrict)
+  slot             MediaSlot
+  heroContentId    String?
+  heroContent      HeroContent?        @relation(fields: [heroContentId], references: [id], onDelete: Cascade)
+  familyMemberId   String?
+  familyMember     FamilyMember?       @relation(fields: [familyMemberId], references: [id], onDelete: Cascade)
+  familyContentId  String?
+  familyContent    FamilyContent?      @relation(fields: [familyContentId], references: [id], onDelete: Cascade)
+  dayContentId     String?
+  dayContent       DayContent?         @relation(fields: [dayContentId], references: [id], onDelete: Cascade)
+  routeId          String?
+  route            CollaborationRoute? @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  sponsorId        String?
+  sponsor          Sponsor?            @relation(fields: [sponsorId], references: [id], onDelete: Cascade)
+  closingContentId String?
+  closingContent   ClosingContent?     @relation(fields: [closingContentId], references: [id], onDelete: Cascade)
+  siteSettingsId   Int?
+  siteSettings     SiteSettings?       @relation(fields: [siteSettingsId], references: [id], onDelete: Cascade)
+  sortOrder        Int                 @default(0)
+  createdAt        DateTime            @default(now()) @db.Timestamptz(3)
+
+  @@unique([slot, heroContentId, mediaId])
+  @@unique([slot, familyMemberId, mediaId])
+  @@unique([slot, familyContentId, mediaId])
+  @@unique([slot, dayContentId, mediaId])
+  @@unique([slot, routeId, mediaId])
+  @@unique([slot, sponsorId, mediaId])
+  @@unique([slot, closingContentId, mediaId])
+  @@unique([slot, siteSettingsId, mediaId])
+  @@index([mediaId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Formularios
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Privado y sensible. Sin IP en bruto. Sin consentimiento de marketing ni newsletter.
+/// `isSynthetic` marca las propuestas ficticias del seed no productivo.
+model Submission {
+  id                    String                    @id @default(cuid(2))
+  name                  String
+  company               String
+  email                 String
+  jobTitle              String?
+  phone                 String?
+  collaborationType     CollaborationType
+  originRouteKey        String?
+  originHoleNumber      Int?
+  /// Ruta + tipo preseleccionado.
+  formOrigin            String
+  message               String
+  consentAt             DateTime                  @db.Timestamptz(3)
+  consentLegalVersionId String
+  consentLegalVersion   LegalVersion              @relation(fields: [consentLegalVersionId], references: [id], onDelete: Restrict)
+  /// Texto exacto de la casilla aceptada.
+  consentText           String
+  status                SubmissionStatus          @default(NUEVA)
+  archivedAt            DateTime?                 @db.Timestamptz(3)
+  readAt                DateTime?                 @db.Timestamptz(3)
+  anonymizedAt          DateTime?                 @db.Timestamptz(3)
+  /// Base para la retención.
+  lastActivityAt        DateTime                  @default(now()) @db.Timestamptz(3)
+  sourcePath            String?
+  referrer              String?
+  utmSource             String?
+  utmMedium             String?
+  utmCampaign           String?
+  utmTerm               String?
+  utmContent            String?
+  isSynthetic           Boolean                   @default(false)
+  statusHistory         SubmissionStatusHistory[]
+  notes                 SubmissionNote[]
+  version               Int                       @default(1)
+  createdAt             DateTime                  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime                  @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById           String?
+  updatedBy             User?                     @relation("SubmissionUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt(sort: Desc)])
+  @@index([archivedAt])
+  @@index([collaborationType])
+  @@index([lastActivityAt])
+  @@index([email])
+}
+
+model SubmissionStatusHistory {
+  id           String            @id @default(cuid(2))
+  submissionId String
+  submission   Submission        @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  fromStatus   SubmissionStatus?
+  toStatus     SubmissionStatus
+  changedById  String?
+  changedBy    User?             @relation("SubmissionStatusChangedBy", fields: [changedById], references: [id], onDelete: SetNull)
+  changedAt    DateTime          @default(now()) @db.Timestamptz(3)
+  note         String?
+
+  @@index([submissionId, changedAt])
+}
+
+model SubmissionNote {
+  id           String     @id @default(cuid(2))
+  submissionId String
+  submission   Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  authorId     String?
+  author       User?      @relation("SubmissionNoteAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  body         String
+  version      Int        @default(1)
+  createdAt    DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt    DateTime   @default(now()) @updatedAt @db.Timestamptz(3)
+  updatedById  String?
+  updatedBy    User?      @relation("SubmissionNoteUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@index([submissionId])
+}
+
+/// `fingerprint` = HMAC-SHA256 de la IP normalizada con FINGERPRINT_HMAC_SECRET. Caduca en 30 días como máximo (CHECK en SQL).
+model AbuseCounter {
+  id          String      @id @default(cuid(2))
+  fingerprint String
+  action      AbuseAction
+  windowStart DateTime    @db.Timestamptz(3)
+  count       Int         @default(0)
+  expiresAt   DateTime    @db.Timestamptz(3)
+
+  @@unique([fingerprint, action, windowStart])
+  @@index([expiresAt])
+}

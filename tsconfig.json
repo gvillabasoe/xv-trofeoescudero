@@ -3,6 +3,7 @@
     "target": "ES2022",
     "lib": ["dom", "es2023"],
     "skipLibCheck": true,
+    "allowJs": true,
     "noUncheckedSideEffectImports": false,
     "strict": true,
     "noUncheckedIndexedAccess": true,

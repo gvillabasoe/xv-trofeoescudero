@@ -1,6 +1,6 @@
 {
   "name": "trofeo-escudero",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.34.6",
@@ -12,25 +12,41 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "next typegen && tsc --noEmit",
-    "test": "vitest run"
+    "typecheck": "prisma generate && next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:integracion": "vitest run --config vitest.integracion.config.ts",
+    "postinstall": "prisma generate",
+    "db:generate": "prisma generate",
+    "db:validate": "prisma validate",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:destructivas": "node scripts/detectar-destructivas.mjs",
+    "vercel-build": "prisma generate && node scripts/desplegar-base.mjs antes && prisma migrate deploy && node scripts/desplegar-base.mjs despues && next build"
   },
   "dependencies": {
+    "@neondatabase/serverless": "1.2.0",
+    "@prisma/adapter-neon": "7.10.0",
+    "@prisma/client": "7.10.0",
     "next": "16.4.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "eslint": "9.39.5",
     "eslint-config-next": "16.4.0",
+    "pg": "8.23.1",
+    "prisma": "7.10.0",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "prisma",
       "sharp",
       "unrs-resolver"
     ]

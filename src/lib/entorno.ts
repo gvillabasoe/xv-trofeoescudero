@@ -1,5 +1,5 @@
 /**
- * Utilidades puras para la página de comprobación del PR-1.
+ * Utilidades puras para la página de comprobación.
  * No leen variables de entorno: reciben los valores como argumento para poder probarse.
  */
 
