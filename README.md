@@ -27,14 +27,14 @@ Hosting en **Vercel Hobby** y código en un repositorio privado de **GitHub Free
 | `pnpm test` | Tests unitarios con Vitest |
 
 ## Cómo se trabaja
-1. Cada bloque de trabajo es un **pull request** con su **preview de Vercel**.
-2. **GitHub Actions** ejecuta lint, typecheck, tests y build **sin secretos**.
-3. Vercel ejecuta además los **Native Deployment Checks** (lint y typecheck).
-4. La preview está protegida con **Vercel Authentication**. Los smoke tests son manuales durante la Fase 3.
-5. **El merge lo hace la organización.** No se hacen pushes directos a `main`.
+1. Cada entrega se sube **directamente a `main`** desde la web de GitHub (decisión de la organización).
+2. Cada subida genera un **despliegue en Vercel**, protegido con **Vercel Authentication** hasta el lanzamiento.
+3. Vercel ejecuta los **Native Deployment Checks** (lint y typecheck) y solo promociona el despliegue si pasan.
+4. **GitHub Actions** ejecuta lint, typecheck, tests y build **sin secretos** en cada subida.
+5. Los smoke tests son manuales durante la Fase 3.
 
 ## Reglas
-- **Ningún secreto en GitHub.** Los valores no productivos viven en Vercel (Preview).
-- **Durante la Fase 3 no hay producción:** `vercel.json` omite los builds de producción (`scripts/ignorar-produccion.sh`).
+- **Ningún secreto en GitHub.** Los valores viven en las variables de Vercel.
+- Hasta el lanzamiento, el despliegue de `main` es un entorno **protegido y no productivo**: solo datos sintéticos.
 - Nunca `prisma db push` en producción. Las migraciones serán versionadas (a partir del PR-2).
 - Nada de datos reales fuera de producción.

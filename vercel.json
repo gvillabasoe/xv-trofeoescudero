@@ -1,5 +1,4 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "nextjs",
-  "ignoreCommand": "bash scripts/ignorar-produccion.sh"
+  "framework": "nextjs"
 }
