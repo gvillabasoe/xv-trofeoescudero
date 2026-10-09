@@ -1,12 +1,7 @@
 {
   "entrega": "final-0.9.0",
-  "nota": "Lo usa scripts/subida-completa.mjs. No lo edites a mano.",
+  "nota": "Lo usa scripts/subida-completa.mjs. No lo edites a mano. No incluye los archivos que empiezan por punto: la subida web de GitHub no los admite y no intervienen en el despliegue (se crean con «Create new file»).",
   "archivos": {
-    ".env.example": "7cb3ca206dabdfd5950e8980b4310234395380d5c89337e7a0d16aecb870d259",
-    ".gitattributes": "8274060ea0041846cf356b2dec3d15793b4f7f0de1b5bd2174e60f0a292c20ee",
-    ".github/workflows/ci.yml": "f12c8b8f7ebf1cdb8191913bfa9e5df4fd72d62e74133f20d4171ba6d4f161c3",
-    ".gitignore": "9ebab844cdb83926511dda293e11ad24743908e8194b89dc1b6dfec373ced381",
-    ".nvmrc": "6d07ac247e81cd42c2c20abf8dfe504413d6b2422e4aba9b2c975a776f155921",
     "README.md": "70ec3f1c7afed367002821a8d6f731aec98beb43225b350484e6d7c752da4bcf",
     "docs/lanzamiento.md": "d60d0884cb77c4ae714c546e492e232e6505a5a3e8e210b9dd134ab33c7b8816",
     "docs/manual-panel.md": "8e933c9d0524140ea9a83950a138fb965558f82d580af9065664ae01d33d3a27",
