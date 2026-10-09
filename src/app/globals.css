@@ -42,9 +42,13 @@ body {
 }
 
 h1,
+h2,
+h3,
 p,
 dl,
-dd {
+dd,
+ol,
+ul {
   margin: 0;
 }
 
@@ -180,6 +184,143 @@ main:focus {
   border-left: 2px solid var(--laton);
   color: var(--piedra);
   font-size: 0.9375rem;
+}
+
+/* Portada provisional (Entrega 3): presentación sencilla del snapshot. El diseño definitivo es de la Fase 4. */
+.aviso-provisional {
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem;
+  border-left: 2px solid var(--laton);
+  background: #fff;
+  color: var(--piedra);
+  font-size: 0.9375rem;
+}
+
+.bloque {
+  padding-block: clamp(2.5rem, 2rem + 3vw, 4.5rem);
+  border-bottom: 1px solid var(--filete);
+}
+
+.bloque--marfil {
+  background: var(--marfil);
+}
+
+.bloque__interior {
+  display: grid;
+  gap: 1.1rem;
+}
+
+.bloque__interior > p,
+.bloque__interior > h2,
+.bloque__interior > h3 {
+  max-width: 44rem;
+}
+
+.bloque h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.75rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--verde-900);
+}
+
+.bloque h3 {
+  font-size: 1.0625rem;
+  color: var(--verde-900);
+}
+
+.pie {
+  color: var(--piedra);
+  font-size: 0.9375rem;
+  font-style: italic;
+}
+
+.lista {
+  display: grid;
+  gap: 0.35rem;
+  padding-left: 1.1rem;
+}
+
+.recorrido {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  padding-left: 1.1rem;
+}
+
+.cifras {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  border-top: 1.5px solid var(--verde-900);
+  background: #fff;
+}
+
+.cifras > div {
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--filete);
+}
+
+.cifras dt,
+.vias .etiqueta {
+  font-size: 0.75rem;
+}
+
+.cifras dt {
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--laton-tinta);
+}
+
+.cifras dd {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  color: var(--verde-900);
+}
+
+.cifras dd span {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  color: var(--piedra);
+}
+
+.vias {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  align-items: start;
+}
+
+.via {
+  display: grid;
+  gap: 0.6rem;
+  padding: 1rem;
+  border-top: 1.5px solid var(--verde-900);
+  background: #fff;
+}
+
+.via summary {
+  cursor: pointer;
+}
+
+.via__titulo {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 500;
+  color: var(--verde-900);
+}
+
+.muro {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  padding: 0;
+  list-style: none;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  color: var(--verde-900);
 }
 
 @media (max-width: 480px) {

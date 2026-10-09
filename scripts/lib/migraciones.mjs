@@ -194,8 +194,9 @@ export function revisarVariables(env) {
   if (entorno === "") {
     errores.push("falta ENTORNO_DATOS en las variables de Vercel. Durante la Fase 3 debe valer NONPROD.");
   } else if (!ENTORNOS_ADMITIDOS.includes(entorno)) {
+    // El valor no se muestra: si alguien pegara ahí un secreto por error, no debe acabar en el log.
     errores.push(
-      `ENTORNO_DATOS vale «${entorno}». Durante la Fase 3 solo se admite NONPROD: la base de producción se conecta en el lanzamiento (F8).`,
+      "ENTORNO_DATOS no vale NONPROD (el valor no se muestra). Escribe exactamente NONPROD, en mayúsculas y sin comillas. Durante la Fase 3 solo se admite NONPROD: la base de producción se conecta en el lanzamiento (F8).",
     );
   }
 

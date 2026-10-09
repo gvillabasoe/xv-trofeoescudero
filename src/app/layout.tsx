@@ -18,8 +18,8 @@ const fuenteTexto = Schibsted_Grotesk({
 });
 
 export const metadata: Metadata = {
-  title: "Trofeo Escudero · Fundación técnica",
-  description: "Página provisional de comprobación técnica. No forma parte de la web pública.",
+  title: "Trofeo Escudero · XV Edición (provisional)",
+  description: "Versión provisional de la Fase 3. No forma parte de la web pública.",
   robots: { index: false, follow: false },
 };
 

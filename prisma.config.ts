@@ -14,6 +14,8 @@ export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
+    // Seed idempotente (Entrega 3). En Vercel lo ejecuta directamente `vercel-build`.
+    seed: "tsx scripts/sembrar.ts",
   },
   ...(urlDirecta ? { datasource: { url: urlDirecta } } : {}),
 });

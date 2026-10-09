@@ -115,6 +115,12 @@ describe("revisarVariables", () => {
     expect(errores.join(" ")).toContain("Fase 3");
   });
 
+  it("no muestra el valor de ENTORNO_DATOS cuando no es válido", () => {
+    const { errores } = revisarVariables({ ...correctas, ENTORNO_DATOS: "postgresql://secreto-pegado-por-error" });
+    expect(errores).toHaveLength(1);
+    expect(errores.join(" ")).not.toContain("secreto-pegado-por-error");
+  });
+
   it("rechaza una DIRECT_URL que use el pooler", () => {
     const { errores } = revisarVariables({ ...correctas, DIRECT_URL: conPool });
     expect(errores.join(" ")).toContain("DIRECT_URL apunta al pooler");

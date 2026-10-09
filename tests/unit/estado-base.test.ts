@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { describirEstadoBase, describirMarcador } from "../../src/lib/estado-base";
+import {
+  describirEstadoBase,
+  describirMarcador,
+  describirVersionPublicada,
+  formatearFechaHora,
+} from "../../src/lib/estado-base";
 
 describe("describirMarcador", () => {
   it("traduce el marcador de entorno de la base", () => {
@@ -41,5 +46,29 @@ describe("describirEstadoBase", () => {
       tablas: 0,
     });
     expect(filas[1]).toEqual({ etiqueta: "Migraciones aplicadas", valor: "Ninguna" });
+  });
+});
+
+describe("describirVersionPublicada", () => {
+  it("indica que no hay versión publicada en CI", () => {
+    expect(describirVersionPublicada(null)).toEqual([{ etiqueta: "Versión publicada", valor: "Ninguna en este build" }]);
+  });
+
+  it("muestra el número y las fechas en hora peninsular", () => {
+    const [publicada, leida] = describirVersionPublicada({
+      numero: 1,
+      publicadaEn: "2026-10-09T16:05:00.000Z",
+      leidaEn: "2026-10-09T16:06:30.000Z",
+    });
+    expect(publicada?.valor).toMatch(/^nº 1 · 9 de octubre de 2026/);
+    expect(publicada?.valor).toContain("18:05");
+    expect(leida).toMatchObject({ etiqueta: "Snapshot leído de Neon" });
+    expect(leida?.valor).toContain("18:06:30");
+  });
+});
+
+describe("formatearFechaHora", () => {
+  it("usa la hora de Madrid también en invierno", () => {
+    expect(formatearFechaHora("2027-01-15T10:00:00.000Z")).toContain("11:00");
   });
 });

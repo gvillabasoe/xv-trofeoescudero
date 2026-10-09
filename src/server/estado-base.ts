@@ -1,11 +1,15 @@
+import { cacheLife } from "next/cache";
 import type { EstadoBase } from "@/lib/estado-base";
 import { hayBaseDeDatos, obtenerPrisma } from "@/server/db";
 
 /**
- * Lee el estado de la base para la página de comprobación. Se ejecuta durante el build
- * (la página es estática), así que no hay consultas en cada visita.
+ * Lee el estado de la base para la página de estado técnico. Va en caché y se rellena
+ * durante el build, así que no hay consultas en cada visita.
  */
 export async function leerEstadoBase(): Promise<EstadoBase> {
+  "use cache";
+  cacheLife("max");
+
   if (!hayBaseDeDatos()) {
     return { disponible: false };
   }
