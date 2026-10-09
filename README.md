@@ -2,7 +2,11 @@
 
 Web app del Trofeo Escudero: landing pública con contenido gestionable y un panel privado de administración.
 
-**Estado:** Fase 3 · **Entrega 4A**: saneamiento de datos y publicación sobre la instalación de la Entrega 3, sin reinicializar nada. Todavía no hay autenticación, CMS ni formulario (Entrega 4B y fases siguientes).
+**Estado:** Fase 3 · **Entrega 4**:
+- **4A:** saneamiento de datos y publicación sobre la instalación de la Entrega 3, sin reinicializar nada.
+- **4B:** Better Auth, alta inicial, TOTP obligatorio y acceso al panel.
+
+Todavía no hay CMS, imágenes ni formulario público (fases siguientes).
 
 ## Stack
 | Pieza | Versión exacta |
@@ -18,6 +22,8 @@ Web app del Trofeo Escudero: landing pública con contenido gestionable y un pan
 | Driver de Neon (`@neondatabase/serverless`) | 1.2.0 |
 | Zod | 4.6.5 |
 | tsx | 4.23.15 |
+| Better Auth (plugins `twoFactor`, `admin` y `nextCookies`) | 1.7.7 |
+| uqr (QR del TOTP, sin dependencias) | 0.1.3 |
 | PostgreSQL | Neon (Fráncfort); PostgreSQL 17 temporal en CI |
 
 ## Dependencias reproducibles (D-LOCKFILE)
@@ -33,6 +39,35 @@ Web app del Trofeo Escudero: landing pública con contenido gestionable y un pan
 |---|---|
 | `/` | Portada provisional: lee solo la versión publicada (`ContentRevision`) |
 | `/estado` | Estado técnico, sin secretos. Muestra: conexión, marcador, migraciones, ejecuciones únicas, propuestas sintéticas, ID, número y `contentHash` de la revisión, y hora e identificador de lectura |
+| `/admin/login` | Acceso: contraseña y, después, código TOTP o código de recuperación |
+| `/admin/alta-inicial` | Alta del primer administrador. 404 real en cuanto existe uno o si falta `ADMIN_SETUP_SECRET` |
+| `/admin/seguridad` | Activar TOTP (obligatorio), regenerar códigos de recuperación y gestionar las sesiones propias |
+| `/admin` | Dashboard técnico provisional. El reset de datos demo solo aparece en Preview |
+
+No hay endpoints HTTP de Better Auth (`/api/auth/*`): el panel usa Server Actions que llaman a Better Auth en el servidor. Así hay menos superficie expuesta, y la subida web de GitHub no admite la carpeta `[...all]` que necesitarían.
+
+## Autenticación y panel (Entrega 4B)
+- **Identidad:** `User` de Better Auth es la identidad canónica; no hay tabla AdminUser paralela.
+  - El registro público está desactivado.
+  - Un hook rechaza **cualquier** creación de usuarios desde Better Auth.
+  - El único alta es la inicial.
+- **Alta inicial** (`src/server/auth/alta-inicial.ts`). Pide el secreto de Vercel `ADMIN_SETUP_SECRET`, que se compara en tiempo constante. Después:
+  1. Limita los intentos por huella HMAC.
+  2. En una transacción con cerrojo, comprueba que no hay ningún administrador.
+  3. Crea usuario, credencial, perfil y auditoría.
+  4. A partir de ahí, el proxy responde 404.
+- **TOTP obligatorio:** sin TOTP activo solo se entra en `/admin/seguridad`.
+  - Los códigos de recuperación se muestran una sola vez y sirven una sola vez.
+- **Protección:**
+  - `src/proxy.ts` redirige sin cookie de sesión.
+  - La autorización real (`guardas.ts`) se hace en cada página y Server Action: sesión en Neon, rol `admin`, cuenta no bloqueada y TOTP.
+- **Rate limiting:**
+  - El acceso y el alta inicial limitan los intentos con `AbuseCounter` y una huella HMAC de la IP. La IP en bruto nunca se guarda.
+  - Better Auth bloquea además el TOTP tras varios códigos fallidos.
+  - Su rate limiting en base de datos queda configurado para el caso de que algún día se publiquen sus endpoints HTTP.
+- **Auditoría** de alta, accesos, fallos, límites, TOTP, códigos, revocaciones, cierre de sesión y reset demo.
+  - Sin emails, contraseñas, códigos, tokens ni IP.
+- **IP y user agent** de las sesiones: solo seguridad. Se borran con la sesión y nunca van a `AuditLog` (§16.1).
 
 ## Base de datos
 - **Migraciones versionadas** en `prisma/migrations/`. Nunca `db push`.
@@ -121,6 +156,8 @@ GitHub Actions, **sin secretos**, en cada PR y en cada subida a `main`:
   1. Migraciones desde cero, comprobación de deriva y reglas SQL.
   2. Base nueva: bootstrap, segunda ejecución como no-op, ejecuciones simultáneas, registros borrados que no vuelven, datos demo, snapshot, publicación y caché.
   3. Instalación equivalente a la Entrega 3 (`tests/fixtures/cargar-entrega-3.ts`) que recibe la 0002, el registro de `SeedRun` y el backfill.
+  4. Autenticación: alta inicial (y su concurrencia), registro desactivado, contraseña, activación y verificación de TOTP, códigos de recuperación de un solo uso, sesiones, cierre de sesión y límite de intentos.
+     - Los secretos son aleatorios, se generan en cada ejecución y solo existen dentro del job.
 - **Lockfile:** que `pnpm-lock.yaml` corresponde a `package.json`.
 
 Nunca se usan Neon, la base de preview, claves de API ni datos reales.
