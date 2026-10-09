@@ -25,12 +25,15 @@ export async function accionIniciarTotp(_previo: EstadoTotp, formulario: FormDat
   const { usuario, cabeceras } = await requerirAdmin({ exigirTotp: false });
   if (usuario.twoFactorEnabled) redirect("/admin/seguridad");
   try {
-    const { totpURI, backupCodes } = await obtenerAuth().api.enableTwoFactor({
+    const resultado = await obtenerAuth().api.enableTwoFactor({
       body: { password: texto(formulario, "contrasena") },
       headers: cabeceras,
     });
+    if (resultado.method !== "totp") {
+      return { paso: "inicio", error: "No se ha podido preparar el TOTP. Vuelve a probar." };
+    }
     // Los códigos se muestran una sola vez: viajan en esta respuesta y no se guardan en ningún otro sitio.
-    return { paso: "verificar", ...presentarTotp(totpURI), codigos: backupCodes };
+    return { paso: "verificar", ...presentarTotp(resultado.totpURI), codigos: resultado.backupCodes };
   } catch {
     return { paso: "inicio", error: "La contraseña no es correcta." };
   }

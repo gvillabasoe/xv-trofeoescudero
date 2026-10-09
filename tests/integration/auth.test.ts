@@ -118,13 +118,14 @@ describe("acceso y TOTP", () => {
   });
 
   it("activa TOTP con un código válido y entrega 10 códigos de recuperación", async () => {
-    const { totpURI, backupCodes } = await auth.api.enableTwoFactor({
+    const resultado = await auth.api.enableTwoFactor({
       body: { password: ADMIN.contrasena },
       headers: principal.cabeceras(),
     });
-    secretoTotp = secretoDeUri(totpURI);
-    codigosRecuperacion = backupCodes;
-    expect(backupCodes.length).toBeGreaterThanOrEqual(10);
+    if (resultado.method !== "totp") throw new Error("Better Auth no ha preparado TOTP");
+    secretoTotp = secretoDeUri(resultado.totpURI);
+    codigosRecuperacion = resultado.backupCodes;
+    expect(resultado.backupCodes.length).toBeGreaterThanOrEqual(10);
     // Hasta verificar el primer código, el TOTP no está activo.
     expect((await prisma.user.findFirstOrThrow()).twoFactorEnabled).toBe(false);
 

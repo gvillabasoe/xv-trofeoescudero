@@ -24,6 +24,8 @@ const nextConfig: NextConfig = {
   // Cache Components: activa 'use cache', cacheTag y cacheLife (fase-2 §8). La web pública lee el snapshot
   // publicado desde la caché y se regenera al invalidar la etiqueta «site-public».
   cacheComponents: true,
+  // Recomendado por Next 16.4 para proyectos nuevos con Cache Components.
+  partialPrefetching: true,
   async headers() {
     return [
       {

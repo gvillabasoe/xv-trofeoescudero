@@ -12,7 +12,7 @@ Todavía no hay CMS, imágenes ni formulario público (fases siguientes).
 | Pieza | Versión exacta |
 |---|---|
 | Node.js | 22.23.3 LTS en CI (`.nvmrc`); `22.x` en Vercel |
-| pnpm | 10.34.6 (`packageManager`; en Vercel, con Corepack) |
+| pnpm | 10.34.6 (`packageManager` en CI; en Vercel, `npx pnpm@10.34.6` en `vercel.json`) |
 | Next.js (App Router, Cache Components) | 16.4.0 |
 | React | 19.3.0 |
 | TypeScript | 6.0.3 |
@@ -29,10 +29,8 @@ Todavía no hay CMS, imágenes ni formulario público (fases siguientes).
 ## Dependencias reproducibles (D-LOCKFILE)
 - `pnpm-lock.yaml` está versionado y **nunca se borra**.
 - CI y Vercel instalan **solo** con `pnpm install --frozen-lockfile`. Si el lockfile falta o no corresponde a `package.json`, CI falla y el despliegue no continúa.
-- **Si una entrega cambia dependencias:**
-  1. El job «Lockfile» publica el lockfile correcto como artefacto.
-  2. Se sube a la **misma rama** antes del merge.
-  3. Con «Squash and merge», `package.json` y `pnpm-lock.yaml` llegan a `main` en un único commit.
+- **Si una entrega cambia dependencias:** el lockfile se genera con pnpm 10.34.6 antes de entregarla y viaja en el mismo ZIP. `package.json` y `pnpm-lock.yaml` llegan juntos, en un único commit.
+- **Red de seguridad:** si alguna vez no coinciden, el job «Lockfile» de CI falla y publica el lockfile correcto como artefacto.
 
 ## Rutas (provisionales)
 | Ruta | Qué es |
