@@ -1,21 +1,15 @@
 import { cacheLife, cacheTag } from "next/cache";
-import { esquemaSnapshot, type SnapshotPublico } from "@/lib/snapshot/esquema";
+import { ETIQUETA_SITIO_PUBLICO } from "@/lib/cache";
 import { hayBaseDeDatos, obtenerPrisma } from "@/server/db";
+import { leerVersionPublicadaDe, type VersionPublicada } from "@/server/version-publicada";
 
-/** Etiqueta de caché de todo lo público. Al publicar se invalida con updateTag(ETIQUETA_SITIO_PUBLICO). */
-export const ETIQUETA_SITIO_PUBLICO = "site-public";
-
-export interface VersionPublicada {
-  numero: number;
-  publicadaEn: string;
-  snapshot: SnapshotPublico;
-  /** Cuándo se leyó de la base. Mientras la caché sea válida, no cambia entre visitas. */
-  leidaEn: string;
-}
+export type { VersionPublicada };
 
 /**
  * La web pública solo lee esto: el snapshot de la versión publicada, en caché (fase-2 §8, paso 7).
- * No consulta Neon en cada visita: la página se genera en el build y se regenera solo al invalidar la etiqueta.
+ * - cacheTag("site-public"): una publicación la invalida con updateTag desde una Server Action.
+ * - cacheLife("max"): el contenido solo cambia al publicar; no hace falta caducidad por tiempo.
+ * - No consulta Neon en cada visita: la página se genera en el build y se regenera al invalidar la etiqueta.
  */
 export async function leerVersionPublicada(): Promise<VersionPublicada | null> {
   "use cache";
@@ -26,19 +20,13 @@ export async function leerVersionPublicada(): Promise<VersionPublicada | null> {
     return null;
   }
 
-  const estado = await obtenerPrisma().siteState.findUnique({
-    where: { id: 1 },
-    select: { publishedRevision: { select: { revisionNumber: true, publishedAt: true, snapshot: true } } },
-  });
-  const revision = estado?.publishedRevision;
-  if (!revision) {
-    return null;
-  }
-
-  return {
-    numero: revision.revisionNumber,
-    publicadaEn: revision.publishedAt.toISOString(),
-    snapshot: esquemaSnapshot.parse(revision.snapshot),
-    leidaEn: new Date().toISOString(),
-  };
+  const version = await leerVersionPublicadaDe(obtenerPrisma());
+  // Instrumentación no sensible: aparece en los logs de Vercel (build o regeneración) cada vez que la
+  // consulta se ejecuta de verdad. Si una visita no deja esta línea, se ha servido desde la caché.
+  console.info(
+    version
+      ? `[cache:${ETIQUETA_SITIO_PUBLICO}] Lectura real de Neon · revisión nº ${version.numero} · lectura ${version.lecturaId}`
+      : `[cache:${ETIQUETA_SITIO_PUBLICO}] Lectura real de Neon · sin versión publicada`,
+  );
+  return version;
 }

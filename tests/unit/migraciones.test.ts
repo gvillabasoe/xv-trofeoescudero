@@ -9,9 +9,11 @@ import {
 } from "../../scripts/lib/migraciones.mjs";
 
 describe("analizarSql (detector de migraciones destructivas)", () => {
-  it("considera segura la migración 0001_inicial real", async () => {
-    const sql = await readFile("prisma/migrations/0001_inicial/migration.sql", "utf8");
-    expect(analizarSql(sql)).toEqual([]);
+  it("considera seguras las migraciones reales 0001 y 0002 (solo añaden)", async () => {
+    for (const nombre of ["0001_inicial", "0002_seedrun"]) {
+      const sql = await readFile(`prisma/migrations/${nombre}/migration.sql`, "utf8");
+      expect(analizarSql(sql), nombre).toEqual([]);
+    }
   });
 
   it("acepta lo que solo crea o amplía", () => {

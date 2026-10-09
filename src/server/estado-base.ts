@@ -1,13 +1,15 @@
-import { cacheLife } from "next/cache";
+import { cacheLife, cacheTag } from "next/cache";
+import { ETIQUETA_SITIO_PUBLICO } from "@/lib/cache";
 import type { EstadoBase } from "@/lib/estado-base";
 import { hayBaseDeDatos, obtenerPrisma } from "@/server/db";
 
 /**
  * Lee el estado de la base para la página de estado técnico. Va en caché y se rellena
- * durante el build, así que no hay consultas en cada visita.
+ * durante el build, así que no hay consultas en cada visita. Solo recuentos e identificadores.
  */
 export async function leerEstadoBase(): Promise<EstadoBase> {
   "use cache";
+  cacheTag(ETIQUETA_SITIO_PUBLICO);
   cacheLife("max");
 
   if (!hayBaseDeDatos()) {
@@ -15,7 +17,7 @@ export async function leerEstadoBase(): Promise<EstadoBase> {
   }
 
   const prisma = obtenerPrisma();
-  const [politica, migraciones, tablas] = await Promise.all([
+  const [politica, migraciones, tablas, ejecuciones, propuestasSinteticas] = await Promise.all([
     prisma.policySettings.findUnique({ where: { id: 1 }, select: { environment: true } }),
     prisma.$queryRaw<{ total: number; ultima: string | null }[]>`
       SELECT count(*)::int AS "total", max("migration_name") AS "ultima"
@@ -25,6 +27,8 @@ export async function leerEstadoBase(): Promise<EstadoBase> {
       SELECT count(*)::int AS "total"
       FROM information_schema.tables
       WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> '_prisma_migrations'`,
+    prisma.seedRun.findMany({ orderBy: { completedAt: "asc" }, select: { key: true } }),
+    prisma.submission.count({ where: { isSynthetic: true } }),
   ]);
 
   return {
@@ -33,5 +37,7 @@ export async function leerEstadoBase(): Promise<EstadoBase> {
     migraciones: migraciones[0]?.total ?? 0,
     ultimaMigracion: migraciones[0]?.ultima ?? null,
     tablas: tablas[0]?.total ?? 0,
+    ejecucionesUnicas: ejecuciones.map((ejecucion) => ejecucion.key),
+    propuestasSinteticas,
   };
 }

@@ -1,6 +1,6 @@
 {
   "name": "trofeo-escudero",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.34.6",
@@ -19,7 +19,8 @@
     "db:generate": "prisma generate",
     "db:validate": "prisma validate",
     "db:migrate:deploy": "prisma migrate deploy",
-    "db:seed": "tsx scripts/sembrar.ts",
+    "db:bootstrap": "tsx scripts/sembrar.ts",
+    "db:seed:demo": "tsx scripts/demo.ts",
     "db:destructivas": "node scripts/detectar-destructivas.mjs",
     "vercel-build": "prisma generate && node scripts/desplegar-base.mjs antes && prisma migrate deploy && node scripts/desplegar-base.mjs despues && tsx scripts/sembrar.ts && next build"
   },

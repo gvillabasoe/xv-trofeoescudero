@@ -50,15 +50,17 @@ export default async function EstadoTecnico() {
         {[...filasBase, ...filasVersion].map((fila) => (
           <div className="tarjeta__fila" key={fila.etiqueta}>
             <dt>{fila.etiqueta}</dt>
-            <dd>{fila.valor}</dd>
+            <dd>{fila.etiqueta === "contentHash" || fila.etiqueta === "ID de la revisión" ? <code>{fila.valor}</code> : fila.valor}</dd>
           </div>
         ))}
       </dl>
 
       <p className="nota">
-        <strong>Prueba de caché:</strong> recarga la página. Si «Snapshot leído de Neon» no cambia, la web
-        sirve la versión publicada desde la caché. Solo cambia con un despliegue nuevo o, a partir de la
-        Entrega 4, al publicar desde el panel. <Link href="/">Ver la portada provisional</Link>.
+        <strong>Sobre la caché:</strong> esta página y la portada se generan en el build y se sirven desde
+        la caché. Que la hora de lectura no cambie al recargar es una pista, no una prueba definitiva. La
+        comprobación fiable está en los logs de Vercel: cada lectura real de Neon deja una línea
+        «[cache:site-public] Lectura real de Neon» con su identificador de lectura. Si una visita no deja esa
+        línea, se ha servido desde la caché. <Link href="/">Ver la portada provisional</Link>.
       </p>
     </main>
   );

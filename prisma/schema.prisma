@@ -59,6 +59,24 @@ enum AuditAction {
   CONFIGURACION_GUARDADA
   RETENCION_EJECUTADA
   RESET_NO_PRODUCTIVO
+  // 0002: añadidos al final (ALTER TYPE … ADD VALUE, compatible con el código anterior).
+  BOOTSTRAP_INICIAL
+  BOOTSTRAP_REGISTRADO
+  BACKFILL_APLICADO
+  DEMO_CREADO
+  LIMITE_INTENTOS
+}
+
+/// Quién hizo la acción auditada. SYSTEM nunca tiene usuario (CHECK en SQL).
+enum AuditActorType {
+  USER
+  SYSTEM
+}
+
+/// Tipo de ejecución única registrada en SeedRun.
+enum SeedRunKind {
+  BOOTSTRAP
+  BACKFILL
 }
 
 /// Los 5 bloques principales de la landing.
@@ -221,6 +239,8 @@ enum AbuseAction {
   FORM
   SETUP
   BREAKGLASS
+  // 0002
+  LOGIN
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -436,12 +456,31 @@ model PolicySettings {
   updatedBy                 User?           @relation("PolicySettingsUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
 }
 
+/// Registro de ejecuciones únicas de datos (0002): el bootstrap del contenido inicial y cada backfill.
+/// Una fila por clave (única): una ejecución registrada no se repite nunca.
+model SeedRun {
+  id          String          @id @default(cuid(2))
+  /// Por ejemplo, «initial-content-v1».
+  key         String          @unique
+  kind        SeedRunKind
+  version     Int
+  /// SHA-256 del conjunto de datos (bootstrap) o de la definición (backfill).
+  checksum    String
+  environment DataEnvironment
+  completedAt DateTime        @db.Timestamptz(3)
+  /// Resumen no sensible: modo, recuentos, revisión verificada.
+  metadata    Json?
+  createdAt   DateTime        @default(now()) @db.Timestamptz(3)
+}
+
 /// Append-only (trigger en SQL). Nunca guarda contraseñas, tokens, mensajes completos, emails, teléfonos ni IP.
 model AuditLog {
-  id         String      @id @default(cuid(2))
-  at         DateTime    @default(now()) @db.Timestamptz(3)
+  id         String         @id @default(cuid(2))
+  at         DateTime       @default(now()) @db.Timestamptz(3)
   actorId    String?
-  actor      User?       @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actor      User?          @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+  /// 0002. Las filas anteriores (todas del seed, sin usuario) quedan como SYSTEM.
+  actorType  AuditActorType @default(SYSTEM)
   action     AuditAction
   entityType String
   entityId   String?
@@ -850,6 +889,10 @@ model Sponsor {
   lifecycle        SponsorLifecycle        @default(ACTIVO)
   url              String?
   shortDescription String?
+  /// 0002. Papel actual conocido, independiente de la relación histórica (p. ej., «AfterParty oficial»).
+  currentRoleLabel String?
+  /// 0002. Ediciones en las que consta la relación, si se conocen (p. ej., «X edición»).
+  editionsNote     String?
   mediaUsages      MediaUsage[]
   version          Int                     @default(1)
   createdAt        DateTime                @default(now()) @db.Timestamptz(3)

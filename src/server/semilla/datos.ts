@@ -1,19 +1,24 @@
 /**
- * Datos de partida del seed (Entrega 3).
+ * Contenido inicial «initial-content-v1» (bootstrap de una sola ejecución, Entrega 4A).
  *
  * - Textos: copy semilla aprobado en fase-1/direccion-creativa.md §4–§5, literal.
  * - Hechos: información v3, «Fecha del Trofeo», tipos de patrocinio y confirmaciones de la organización.
  * - No hay datos inventados ni de prospección. Lo que no se conoce queda vacío u oculto:
  *   contacto (P1), titular legal (P2), horarios (P7), campo de los hoyos (P8), edad de Nacho.
- * - Las categorías de marca no constan en las fuentes: todas van a «Sin categoría», salvo
- *   Castillo de Cuzcurrita (bodega / vino, confirmado por la organización).
+ * - 18 entidades históricas registradas (no «18 patrocinadores»): la fuente no distingue, para la mayoría,
+ *   si fueron patrocinadoras o colaboradoras. Solo se concreta lo confirmado (Castillo de Cuzcurrita,
+ *   dalecandELA y el papel actual de Luz de Mar).
+ * - Los datos demo (propuestas ficticias) están aparte, en demo.ts: no forman parte del bootstrap.
+ * - Si cambia algo de este archivo, el bootstrap ya ejecutado NO se repite: cualquier cambio en una base
+ *   existente se hace con un backfill versionado (backfills.ts).
  */
 
 export const SITIO = {
   siteName: "Trofeo Escudero",
   editionLabel: "XV Edición",
   editionNumber: 15,
-  eventDate: new Date("2027-08-03T00:00:00.000Z"),
+  /** AAAA-MM-DD; se guarda como DATE. */
+  eventDate: "2027-08-03",
   venueName: "Golf El Rompido",
   location: "El Rompido",
   afterPartyName: "Luz de Mar El Rompido",
@@ -327,13 +332,21 @@ export const OPORTUNIDADES: ReadonlyArray<{
   { key: "premios-sorteo", route: "DESPUES", name: "Premios para sorteos" },
 ];
 
+/**
+ * Categorías comerciales. «Sin categoría» solo indica que la fuente no da una categoría comercial;
+ * no describe la relación histórica de la entidad.
+ */
 export const CATEGORIAS = [
   { slug: "sin-categoria", name: "Sin categoría", requiresLegalReview: false, sortOrder: 0 },
   { slug: "bodega-vino", name: "Bodega / vino", requiresLegalReview: true, sortOrder: 1 },
+  { slug: "afterparty-oficial", name: "AfterParty oficial", requiresLegalReview: false, sortOrder: 2 },
+  { slug: "colaboracion-solidaria", name: "Colaboración solidaria", requiresLegalReview: false, sortOrder: 3 },
 ] as const;
 
-/** Los 17 patrocinadores y colaboradores históricos de la información v3, en su orden. */
-const MARCAS_V3 = [
+export type SlugCategoria = (typeof CATEGORIAS)[number]["slug"];
+
+/** Las 17 entidades históricas de la información v3, en su orden. */
+export const NOMBRES_ENTIDADES_V3 = [
   ["Google", "google"],
   ["Repsol", "repsol"],
   ["ABANCA", "abanca"],
@@ -353,31 +366,76 @@ const MARCAS_V3 = [
   ["Aon", "aon"],
 ] as const;
 
-export const PATROCINADORES = [
-  ...MARCAS_V3.map(([name, slug], indice) => ({
-    name,
-    slug,
-    relationshipType:
-      slug === "dalecandela" ? ("COLABORACION_SOLIDARIA" as const) : ("PATROCINADOR_O_COLABORADOR" as const),
-    source: "INFO_V3" as const,
-    sourceNote: "Información v3: patrocinadores y colaboradores históricos",
-    categorySlug: "sin-categoria",
-    // Nombre en tipografía, como en el copy aprobado del muro. El logo sigue pendiente de permiso.
-    publicVisibility: true,
-    legalReview: "NO_REQUERIDA" as const,
-    sortOrder: indice + 1,
-  })),
+export interface EntidadHistorica {
+  name: string;
+  slug: string;
+  relationshipType: "PATROCINADOR" | "COLABORADOR" | "PATROCINADOR_O_COLABORADOR" | "COLABORACION_SOLIDARIA";
+  source: "INFO_V3" | "GUION" | "ORGANIZACION" | "OTRA";
+  sourceNote: string;
+  categorySlug: SlugCategoria;
+  publicVisibility: boolean;
+  legalReview: "NO_REQUERIDA" | "PENDIENTE" | "APROBADA" | "RECHAZADA";
+  currentRoleLabel: string | null;
+  editionsNote: string | null;
+  sortOrder: number;
+}
+
+type Clasificacion = Pick<EntidadHistorica, "relationshipType" | "categorySlug" | "currentRoleLabel" | "editionsNote">;
+
+/** Clasificación concreta de las entidades de la v3 de las que se sabe algo más. */
+export const CLASIFICACION_V3: Readonly<Partial<Record<string, Clasificacion>>> = {
+  // Colaboración solidaria especial de la X edición; no es una marca comercial genérica.
+  dalecandela: {
+    relationshipType: "COLABORACION_SOLIDARIA",
+    categorySlug: "colaboracion-solidaria",
+    currentRoleLabel: null,
+    editionsNote: "X edición",
+  },
+  // Relación histórica sin concretar y papel actual conocido: AfterParty oficial.
+  "luz-de-mar": {
+    relationshipType: "PATROCINADOR_O_COLABORADOR",
+    categorySlug: "afterparty-oficial",
+    currentRoleLabel: "AfterParty oficial",
+    editionsNote: null,
+  },
+};
+
+/**
+ * 18 entidades históricas registradas: las 17 de la información v3 y Castillo de Cuzcurrita.
+ * Cuando la fuente no dice si una entidad fue patrocinadora o colaboradora, se usa
+ * PATROCINADOR_O_COLABORADOR: no se inventa una relación más concreta.
+ */
+export const ENTIDADES_HISTORICAS: readonly EntidadHistorica[] = [
+  ...NOMBRES_ENTIDADES_V3.map(
+    ([name, slug], indice): EntidadHistorica => ({
+      name,
+      slug,
+      relationshipType: "PATROCINADOR_O_COLABORADOR",
+      source: "INFO_V3",
+      sourceNote: "Información v3: patrocinadores y colaboradores históricos",
+      categorySlug: "sin-categoria",
+      currentRoleLabel: null,
+      editionsNote: null,
+      ...CLASIFICACION_V3[slug],
+      // Nombre en tipografía, como en el copy aprobado del muro. El logo sigue pendiente de permiso.
+      publicVisibility: true,
+      legalReview: "NO_REQUERIDA",
+      sortOrder: indice + 1,
+    }),
+  ),
   {
     name: "Castillo de Cuzcurrita",
     slug: "castillo-de-cuzcurrita",
-    relationshipType: "PATROCINADOR" as const,
-    source: "ORGANIZACION" as const,
+    relationshipType: "PATROCINADOR",
+    source: "ORGANIZACION",
     sourceNote: "Confirmación directa de la organización: patrocinador de una edición anterior",
     categorySlug: "bodega-vino",
+    currentRoleLabel: null,
+    editionsNote: null,
     // Hecho histórico confirmado; exposición pública desactivada hasta la revisión jurídica (C5).
     publicVisibility: false,
-    legalReview: "PENDIENTE" as const,
-    sortOrder: MARCAS_V3.length + 1,
+    legalReview: "PENDIENTE",
+    sortOrder: NOMBRES_ENTIDADES_V3.length + 1,
   },
 ];
 
@@ -386,75 +444,36 @@ export const PAGINAS_LEGALES = [
   { slug: "aviso-legal", title: "Aviso legal" },
 ] as const;
 
-/**
- * Solo en NONPROD: datos ficticios para probar la bandeja de propuestas.
- * Dominios example.com (reservados para ejemplos) y ninguna marca ni persona real.
- */
-export const VERSION_LEGAL_SINTETICA = {
-  versionLabel: "sintetica-1",
-  body: "Texto sintético para pruebas en el entorno no productivo. No es la política de privacidad del Trofeo Escudero.",
+/** Todo el contenido inicial, para calcular el checksum de «initial-content-v1». */
+export const CONTENIDO_INICIAL = {
+  SITIO,
+  BLOQUES,
+  HERO,
+  CIFRAS,
+  FAMILIA,
+  MIEMBROS,
+  DIA,
+  RECORRIDO,
+  COLABORAR,
+  CIERRE,
+  VIAS,
+  CONCURSOS,
+  OPORTUNIDADES,
+  CATEGORIAS,
+  ENTIDADES_HISTORICAS,
+  PAGINAS_LEGALES,
 } as const;
 
-export const TEXTO_CONSENTIMIENTO = "He leído y acepto la política de privacidad.";
-
-export const PROPUESTAS_FICTICIAS = [
-  {
-    name: "Persona de Prueba Uno",
-    company: "Empresa Ficticia Uno (prueba)",
-    email: "prueba.uno@example.com",
-    jobTitle: "Cargo ficticio",
-    collaborationType: "PATROCINADOR_PRINCIPAL_POLO",
-    originRouteKey: "PECHO",
-    originHoleNumber: null,
-    formOrigin: "via:PECHO · tipo:PATROCINADOR_PRINCIPAL_POLO",
-    status: "NUEVA",
-    archivada: false,
-    leida: false,
-    nota: null,
-  },
-  {
-    name: "Persona de Prueba Dos",
-    company: "Empresa Ficticia Dos (prueba)",
-    email: "prueba.dos@example.com",
-    jobTitle: null,
-    collaborationType: "WELCOME_PACK",
-    originRouteKey: "BOLSA",
-    originHoleNumber: null,
-    formOrigin: "via:BOLSA · tipo:WELCOME_PACK",
-    status: "REVISADA",
-    archivada: false,
-    leida: true,
-    nota: null,
-  },
-  {
-    name: "Persona de Prueba Tres",
-    company: "Empresa Ficticia Tres (prueba)",
-    email: "prueba.tres@example.com",
-    jobTitle: "Cargo ficticio",
-    collaborationType: "HOYO",
-    originRouteKey: "JUEGO",
-    originHoleNumber: 12,
-    formOrigin: "via:JUEGO · hoyo:12 · tipo:HOYO",
-    status: "EN_CONVERSACION",
-    archivada: false,
-    leida: true,
-    nota: "Nota ficticia de prueba.",
-  },
-  {
-    name: "Persona de Prueba Cuatro",
-    company: "Empresa Ficticia Cuatro (prueba)",
-    email: "prueba.cuatro@example.com",
-    jobTitle: null,
-    collaborationType: "OTRA",
-    originRouteKey: null,
-    originHoleNumber: null,
-    formOrigin: "directo · tipo:OTRA",
-    status: "DESCARTADA",
-    archivada: true,
-    leida: true,
-    nota: null,
-  },
+/** Claves de las oportunidades principales que debe tener una instalación coherente. */
+export const OPORTUNIDADES_PRINCIPALES = [
+  "patrocinador-principal",
+  "welcome-pack-completo",
+  "drive-mas-largo-hoyo-4",
+  "bola-mas-cercana-hoyo-3",
+  "bola-mas-cercana-hoyo-6",
+  "bola-mas-cercana-hoyo-12",
+  "bola-mas-cercana-hoyo-16",
+  "premio-ganador-handicap",
+  "premio-ganador-scratch",
+  "premios-sorteo",
 ] as const;
-
-export const MENSAJE_FICTICIO =
-  "Propuesta ficticia generada por el seed para probar la bandeja de propuestas. No corresponde a ninguna empresa ni persona real.";

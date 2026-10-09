@@ -16,36 +16,29 @@ describe("describirMarcador", () => {
 
 describe("describirEstadoBase", () => {
   it("indica que no hay base en CI", () => {
-    expect(describirEstadoBase({ disponible: false })).toEqual([
-      { etiqueta: "Base de datos", valor: "Sin conexión en este build (CI o local)" },
-    ]);
+    const filas = describirEstadoBase({ disponible: false });
+    expect(filas.map((fila) => fila.etiqueta)).toEqual(["Conexión", "Base de datos"]);
   });
 
-  it("resume marcador, migraciones y tablas", () => {
+  it("resume conexión, marcador, migraciones, tablas, ejecuciones únicas y datos sintéticos", () => {
     expect(
       describirEstadoBase({
         disponible: true,
         entorno: "NONPROD",
-        migraciones: 1,
-        ultimaMigracion: "0001_inicial",
-        tablas: 38,
+        migraciones: 2,
+        ultimaMigracion: "0002_seedrun",
+        tablas: 39,
+        ejecucionesUnicas: ["initial-content-v1", "entidades-historicas-v1"],
+        propuestasSinteticas: 4,
       }),
     ).toEqual([
+      { etiqueta: "Conexión", valor: "Conectada durante el build" },
       { etiqueta: "Base de datos", valor: "No productiva (NONPROD)" },
-      { etiqueta: "Migraciones aplicadas", valor: "1 · última: 0001_inicial" },
-      { etiqueta: "Tablas del modelo", valor: "38" },
+      { etiqueta: "Migraciones aplicadas", valor: "2 · última: 0002_seedrun" },
+      { etiqueta: "Tablas del modelo", valor: "39" },
+      { etiqueta: "Ejecuciones únicas", valor: "initial-content-v1 · entidades-historicas-v1" },
+      { etiqueta: "Propuestas sintéticas", valor: "4" },
     ]);
-  });
-
-  it("muestra «Ninguna» si todavía no hay migraciones", () => {
-    const filas = describirEstadoBase({
-      disponible: true,
-      entorno: null,
-      migraciones: 0,
-      ultimaMigracion: null,
-      tablas: 0,
-    });
-    expect(filas[1]).toEqual({ etiqueta: "Migraciones aplicadas", valor: "Ninguna" });
   });
 });
 
@@ -54,16 +47,25 @@ describe("describirVersionPublicada", () => {
     expect(describirVersionPublicada(null)).toEqual([{ etiqueta: "Versión publicada", valor: "Ninguna en este build" }]);
   });
 
-  it("muestra el número y las fechas en hora peninsular", () => {
-    const [publicada, leida] = describirVersionPublicada({
+  it("muestra ID, número, huella y fechas en hora peninsular, sin secretos", () => {
+    const filas = describirVersionPublicada({
+      revisionId: "rev-123",
       numero: 1,
+      contentHash: "f".repeat(64),
       publicadaEn: "2026-10-09T16:05:00.000Z",
       leidaEn: "2026-10-09T16:06:30.000Z",
+      lecturaId: "abcd1234",
     });
-    expect(publicada?.valor).toMatch(/^nº 1 · 9 de octubre de 2026/);
-    expect(publicada?.valor).toContain("18:05");
-    expect(leida).toMatchObject({ etiqueta: "Snapshot leído de Neon" });
-    expect(leida?.valor).toContain("18:06:30");
+    expect(filas.map((fila) => fila.etiqueta)).toEqual([
+      "Versión publicada",
+      "ID de la revisión",
+      "contentHash",
+      "Snapshot leído de Neon",
+      "Identificador de lectura",
+    ]);
+    expect(filas[0]?.valor).toMatch(/^nº 1 · 9 de octubre de 2026/);
+    expect(filas[0]?.valor).toContain("18:05");
+    expect(filas[3]?.valor).toContain("18:06:30");
   });
 });
 

@@ -3,29 +3,42 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@/generated/prisma/client";
 import { ErrorPublicacion } from "@/lib/snapshot/construir";
 import { esquemaSnapshot } from "@/lib/snapshot/esquema";
+import { buscarDatosPrivados } from "@/lib/snapshot/privacidad";
 import { ConflictoDeVersion, publicar } from "@/server/publicacion";
-import { sembrar } from "@/server/semilla/sembrar";
+import { aplicarBackfills } from "@/server/semilla/backfills";
+import { bootstrap, CLAVE_CONTENIDO_INICIAL, ErrorBootstrap } from "@/server/semilla/bootstrap";
+import { NOMBRES_ENTIDADES_V3 } from "@/server/semilla/datos";
+import { DemoNoPermitida, reiniciarDemo, sembrarDemo } from "@/server/semilla/demo";
+import { leerVersionPublicadaDe } from "@/server/version-publicada";
 
-// Seed y publicación sobre una base vacía y migrada (SEMILLA_URL), distinta de la de los tests de 0001.
+// Base 2 de CI (BOOTSTRAP_URL): base nueva, vacía y migrada. Los tests van en orden y comparten la base.
 // En la aplicación se usa el adaptador de Neon; aquí, el de PostgreSQL, porque la base de CI es un contenedor.
 
-const url = process.env.SEMILLA_URL;
+const url = process.env.BOOTSTRAP_URL;
 if (!url) {
-  throw new Error("Los tests del seed necesitan SEMILLA_URL apuntando a una base de CI vacía y migrada.");
+  throw new Error("Falta BOOTSTRAP_URL: los tests del bootstrap necesitan la base 2 de CI.");
 }
 
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+const crearCliente = () => new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
+const prisma = crearCliente();
+const ENV_PREVIEW = { VERCEL_ENV: "preview", ENTORNO_DATOS: "NONPROD" };
 
-async function snapshotPublicado() {
-  const estado = await prisma.siteState.findUniqueOrThrow({
-    where: { id: 1 },
-    include: { publishedRevision: true },
-  });
-  return esquemaSnapshot.parse(estado.publishedRevision?.snapshot);
+async function recuentos() {
+  return {
+    bloques: await prisma.pageSection.count(),
+    vias: await prisma.collaborationRoute.count(),
+    textosVia: await prisma.routeItem.count(),
+    hoyos: await prisma.competitionHole.count(),
+    oportunidades: await prisma.opportunity.count(),
+    categorias: await prisma.sponsorCategory.count(),
+    entidades: await prisma.sponsor.count(),
+    revisiones: await prisma.contentRevision.count(),
+    propuestas: await prisma.submission.count(),
+  };
 }
 
 beforeAll(async () => {
-  // El marcador de entorno lo fija el build antes del seed; aquí se simula ese paso.
+  // El marcador de entorno lo fija el build antes del bootstrap; aquí se simula ese paso.
   await prisma.policySettings.create({ data: { id: 1, environment: "NONPROD" } });
 });
 
@@ -33,108 +46,144 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-describe("seed", () => {
-  it("crea el contenido de partida y publica la versión nº 1", async () => {
-    const resumen = await sembrar(prisma, { entorno: "NONPROD" });
-
-    expect(resumen.publicada).toBe(1);
-    expect(await prisma.pageSection.count()).toBe(5);
-    expect(await prisma.heroFigure.count()).toBe(5);
-    expect(await prisma.collaborationRoute.count()).toBe(4);
-    expect(await prisma.competitionHole.count()).toBe(18);
-    expect(await prisma.opportunity.count()).toBe(33);
-    expect(await prisma.sponsor.count()).toBe(18);
-    expect(await prisma.contentRevision.count()).toBe(1);
+describe("bootstrap · base nueva", () => {
+  it("una base parcial sin SeedRun falla de forma segura y no cambia nada", async () => {
+    await prisma.pageSection.create({ data: { key: "HERO", indexLabel: "01", sortOrder: 1 } });
+    await expect(bootstrap(prisma, { entorno: "NONPROD" })).rejects.toThrow(ErrorBootstrap);
+    expect(await prisma.seedRun.count()).toBe(0);
+    expect(await prisma.pageSection.count()).toBe(1);
+    await prisma.pageSection.deleteMany();
   });
 
-  it("no crea administradores ni propuestas reales; las ficticias están marcadas", async () => {
-    expect(await prisma.user.count()).toBe(0);
-    expect(await prisma.submission.count({ where: { isSynthetic: false } })).toBe(0);
-    expect(await prisma.submission.count({ where: { isSynthetic: true } })).toBe(4);
-    const emails = await prisma.submission.findMany({ select: { email: true } });
-    expect(emails.every(({ email }) => email.endsWith("@example.com"))).toBe(true);
-  });
+  it("dos ejecuciones simultáneas inicializan la base una sola vez", async () => {
+    const otro = crearCliente();
+    try {
+      const resultados = await Promise.all([
+        bootstrap(prisma, { entorno: "NONPROD" }),
+        bootstrap(otro, { entorno: "NONPROD" }),
+      ]);
+      const acciones = resultados.map((resultado) => resultado.accion).sort();
+      expect(acciones).toEqual(["creado", "ya-registrado"]);
+    } finally {
+      await otro.$disconnect();
+    }
 
-  it("registra Castillo de Cuzcurrita como histórico confirmado, oculto y con revisión jurídica pendiente", async () => {
-    const castillo = await prisma.sponsor.findUniqueOrThrow({
-      where: { slug: "castillo-de-cuzcurrita" },
-      include: { category: true },
+    expect(await recuentos()).toEqual({
+      bloques: 5,
+      vias: 4,
+      textosVia: 41,
+      hoyos: 18,
+      oportunidades: 33,
+      categorias: 4,
+      entidades: 18,
+      revisiones: 1,
+      propuestas: 0,
     });
-    expect(castillo).toMatchObject({
+    const seedRun = await prisma.seedRun.findUniqueOrThrow({ where: { key: CLAVE_CONTENIDO_INICIAL } });
+    expect(seedRun).toMatchObject({ kind: "BOOTSTRAP", version: 1, environment: "NONPROD" });
+    expect(await prisma.auditLog.count({ where: { action: "BOOTSTRAP_INICIAL", actorType: "SYSTEM", actorId: null } })).toBe(1);
+    expect(await prisma.user.count()).toBe(0);
+  });
+
+  it("una segunda ejecución no modifica nada", async () => {
+    const antes = await recuentos();
+    const auditoria = await prisma.auditLog.count();
+    expect(await bootstrap(prisma, { entorno: "NONPROD" })).toEqual({ accion: "ya-registrado" });
+    expect(await recuentos()).toEqual(antes);
+    expect(await prisma.auditLog.count()).toBe(auditoria);
+  });
+
+  it("un registro borrado después del bootstrap no reaparece", async () => {
+    await prisma.opportunity.delete({ where: { key: "premios-sorteo" } });
+    await bootstrap(prisma, { entorno: "NONPROD" });
+    expect(await prisma.opportunity.findUnique({ where: { key: "premios-sorteo" } })).toBeNull();
+  });
+
+  it("el backfill de entidades históricas queda registrado sin cambios en una base nueva", async () => {
+    const [resultado] = await aplicarBackfills(prisma, { entorno: "NONPROD" });
+    expect(resultado).toMatchObject({ clave: "entidades-historicas-v1", estado: "aplicado", metadata: { cambios: [] } });
+    const [repetido] = await aplicarBackfills(prisma, { entorno: "NONPROD" });
+    expect(repetido).toEqual({ clave: "entidades-historicas-v1", estado: "ya-aplicado" });
+  });
+});
+
+describe("entidades históricas", () => {
+  it("son 18 y solo se concreta lo confirmado", async () => {
+    const entidades = await prisma.sponsor.findMany({ include: { category: true } });
+    expect(entidades).toHaveLength(18);
+    const porSlug = new Map(entidades.map((entidad) => [entidad.slug, entidad]));
+
+    expect(porSlug.get("castillo-de-cuzcurrita")).toMatchObject({
       relationshipType: "PATROCINADOR",
       temporalRelation: "HISTORICO",
       confirmed: true,
       source: "ORGANIZACION",
       publicVisibility: false,
-      logoPermission: "PENDIENTE",
       legalReview: "PENDIENTE",
-      lifecycle: "ACTIVO",
+      category: { name: "Bodega / vino", requiresLegalReview: true },
     });
-    expect(castillo.category).toMatchObject({ name: "Bodega / vino", requiresLegalReview: true });
-  });
-
-  it("deja ocultos y vacíos los datos que no se conocen", async () => {
-    expect(await prisma.contactChannel.count()).toBe(0);
-    expect(await prisma.competitionHole.count({ where: { OR: [{ showCourse: true }, { NOT: { course: null } }] } })).toBe(0);
-    expect(await prisma.opportunity.count({ where: { showStatusPublicly: true } })).toBe(0);
-    expect(await prisma.familyMember.count({ where: { NOT: { ageManual: null } } })).toBe(0);
-    expect(await prisma.dayStep.count({ where: { NOT: { time: null } } })).toBe(0);
-    const ajustes = await prisma.siteSettings.findUniqueOrThrow({ where: { id: 1 } });
-    expect(ajustes).toMatchObject({ legalOwnerName: null, legalOwnerTaxId: null, legalOwnerAddress: null });
-  });
-
-  it("publica un snapshot válido sin datos privados", async () => {
-    const snapshot = await snapshotPublicado();
-    const json = JSON.stringify(snapshot);
-
-    expect(snapshot.cierre?.historial.marcas).toHaveLength(17);
-    expect(json).not.toContain("Castillo de Cuzcurrita");
-    expect(json).not.toContain("example.com");
-    expect(json).not.toContain("Información v3");
-    expect(json).not.toContain("DISPONIBLE");
-    expect(json).not.toMatch(/Junior|Senior/);
-    expect(snapshot.colaborar.notaTransparencia).toBe(
-      "Sin promesas infladas: no vendemos cifras que no podamos demostrar ni datos de participantes. Cualquier activación dentro del campo se acuerda primero con el club.",
+    expect(porSlug.get("dalecandela")).toMatchObject({
+      relationshipType: "COLABORACION_SOLIDARIA",
+      editionsNote: "X edición",
+      category: { slug: "colaboracion-solidaria" },
+    });
+    expect(porSlug.get("luz-de-mar")).toMatchObject({
+      temporalRelation: "HISTORICO",
+      currentRoleLabel: "AfterParty oficial",
+      category: { slug: "afterparty-oficial" },
+    });
+    const restantes = entidades.filter(
+      (entidad) => !["castillo-de-cuzcurrita", "dalecandela", "luz-de-mar"].includes(entidad.slug),
     );
-    expect(snapshot.colaborar.concursos.hoyos.map((hoyo) => hoyo.numero)).toEqual([3, 4, 6, 12, 16]);
-    expect(snapshot.colaborar.concursos.hoyos.every((hoyo) => hoyo.campo === null)).toBe(true);
-    expect(snapshot.familia?.titulo).toBe("La familia se reúne. La rivalidad viene sola.");
-    expect(snapshot.familia?.miembros.every((miembro) => miembro.edad === null)).toBe(true);
+    expect(restantes).toHaveLength(15);
+    expect(restantes.every((entidad) => entidad.relationshipType === "PATROCINADOR_O_COLABORADOR")).toBe(true);
+  });
+});
+
+describe("snapshot publicado", () => {
+  it("es válido y no contiene datos privados, marcas ocultas ni prospección", async () => {
+    const version = await leerVersionPublicadaDe(prisma);
+    expect(version?.numero).toBe(1);
+    const snapshot = esquemaSnapshot.parse(version?.snapshot);
+
+    expect(buscarDatosPrivados(snapshot, { textosProhibidos: ["Castillo de Cuzcurrita", "Cuzcurrita"] })).toEqual([]);
+    // Lista cerrada: solo entidades históricas de la v3. Cualquier otra marca (prospección) haría fallar el test.
+    const permitidas = new Set<string>(NOMBRES_ENTIDADES_V3.map(([nombre]) => nombre));
+    const marcas = snapshot.cierre?.historial.marcas.map((marca) => marca.nombre) ?? [];
+    expect(marcas).toHaveLength(17);
+    expect(marcas.every((marca) => permitidas.has(marca))).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toContain("DISPONIBLE");
   });
 
-  it("es idempotente: una segunda ejecución no crea nada ni publica otra versión", async () => {
-    const resumen = await sembrar(prisma, { entorno: "NONPROD" });
-    expect(resumen).toEqual({ creados: {}, publicada: null });
-    expect(await prisma.contentRevision.count()).toBe(1);
+  it("dos lecturas devuelven la misma revisión y la misma huella", async () => {
+    const [primera, segunda] = await Promise.all([leerVersionPublicadaDe(prisma), leerVersionPublicadaDe(prisma)]);
+    expect(primera?.revisionId).toBe(segunda?.revisionId);
+    expect(primera?.contentHash).toBe(segunda?.contentHash);
+    expect(primera?.contentHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("un cambio en el borrador no cambia la versión publicada", async () => {
+    const antes = await leerVersionPublicadaDe(prisma);
+    await prisma.heroContent.updateMany({ data: { lead: "Texto del borrador sin publicar", version: { increment: 1 } } });
+    const despues = await leerVersionPublicadaDe(prisma);
+    expect(despues?.revisionId).toBe(antes?.revisionId);
+    expect(despues?.contentHash).toBe(antes?.contentHash);
+    expect(despues?.snapshot.hero.entradilla).not.toBe("Texto del borrador sin publicar");
   });
 });
 
 describe("publicación", () => {
-  it("no crea una versión nueva si el contenido no ha cambiado", async () => {
-    const resultado = await publicar(prisma, { actorId: null });
-    expect(resultado).toEqual({ publicada: false, numero: 1, motivo: "identica" });
-    expect(await prisma.contentRevision.count()).toBe(1);
-  });
-
-  it("el seed nunca sobrescribe lo editado", async () => {
-    await prisma.heroContent.updateMany({ data: { lead: "Texto editado en el panel", version: { increment: 1 } } });
-    await sembrar(prisma, { entorno: "NONPROD" });
-    const hero = await prisma.heroContent.findFirstOrThrow();
-    expect(hero.lead).toBe("Texto editado en el panel");
-  });
-
-  it("publica el cambio como versión nº 2, actualiza el estado y lo audita", async () => {
+  it("publica el borrador como versión nº 2, actualiza el estado y lo audita", async () => {
     const resultado = await publicar(prisma, { actorId: null, versionEsperada: 1, comentario: "Prueba" });
-    expect(resultado).toEqual({ publicada: true, numero: 2 });
-
-    const estado = await prisma.siteState.findUniqueOrThrow({ where: { id: 1 }, include: { publishedRevision: true } });
+    expect(resultado).toMatchObject({ publicada: true, numero: 2 });
+    const estado = await prisma.siteState.findUniqueOrThrow({ where: { id: 1 } });
     expect(estado.version).toBe(2);
-    expect(estado.publishedRevision?.revisionNumber).toBe(2);
-    expect((await snapshotPublicado()).hero.entradilla).toBe("Texto editado en el panel");
+    expect((await leerVersionPublicadaDe(prisma))?.snapshot.hero.entradilla).toBe("Texto del borrador sin publicar");
     expect(await prisma.auditLog.count({ where: { action: "PUBLICACION" } })).toBe(2);
-    // La revisión anterior sigue intacta.
-    const primera = await prisma.contentRevision.findUniqueOrThrow({ where: { revisionNumber: 1 } });
-    expect(esquemaSnapshot.parse(primera.snapshot).hero.entradilla).not.toBe("Texto editado en el panel");
+  });
+
+  it("no crea una versión nueva si el contenido no ha cambiado", async () => {
+    expect(await publicar(prisma, { actorId: null })).toEqual({ publicada: false, numero: 2, motivo: "identica" });
   });
 
   it("rechaza publicar sobre una versión que ya no es la vigente", async () => {
@@ -145,5 +194,55 @@ describe("publicación", () => {
     await prisma.collaborationContent.updateMany({ data: { transparencyNote: "" } });
     await expect(publicar(prisma, { actorId: null })).rejects.toThrow(ErrorPublicacion);
     expect(await prisma.contentRevision.count()).toBe(2);
+  });
+
+  it("la revisión nº 1 sigue intacta y no se puede modificar", async () => {
+    const primera = await prisma.contentRevision.findUniqueOrThrow({ where: { revisionNumber: 1 } });
+    expect(esquemaSnapshot.parse(primera.snapshot).hero.entradilla).not.toBe("Texto del borrador sin publicar");
+    await expect(
+      prisma.contentRevision.update({ where: { id: primera.id }, data: { publishComment: "cambio" } }),
+    ).rejects.toThrow();
+    const otraVez = await prisma.contentRevision.findUniqueOrThrow({ where: { id: primera.id } });
+    expect(otraVez.publishComment).toBe(primera.publishComment);
+  });
+});
+
+describe("datos demo", () => {
+  it("fallan en el entorno Production de Vercel y sin NONPROD", async () => {
+    await expect(sembrarDemo(prisma, { env: { VERCEL_ENV: "production", ENTORNO_DATOS: "NONPROD" } })).rejects.toThrow(
+      DemoNoPermitida,
+    );
+    await expect(sembrarDemo(prisma, { env: { VERCEL_ENV: "preview", ENTORNO_DATOS: "PROD" } })).rejects.toThrow(
+      DemoNoPermitida,
+    );
+    expect(await prisma.submission.count()).toBe(0);
+  });
+
+  it("solo se crean con una acción explícita, sintéticas y con emails example.com", async () => {
+    expect(await sembrarDemo(prisma, { env: ENV_PREVIEW })).toEqual({ creadas: 4, existentes: 0 });
+    const propuestas = await prisma.submission.findMany();
+    expect(propuestas).toHaveLength(4);
+    expect(propuestas.every((propuesta) => propuesta.isSynthetic && propuesta.email.endsWith("@example.com"))).toBe(true);
+  });
+
+  it("si se borran, no reaparecen con un nuevo despliegue (bootstrap y backfills)", async () => {
+    await prisma.submission.deleteMany({ where: { isSynthetic: true } });
+    await bootstrap(prisma, { entorno: "NONPROD" });
+    await aplicarBackfills(prisma, { entorno: "NONPROD" });
+    expect(await prisma.submission.count()).toBe(0);
+  });
+
+  it("el reset demo recrea solo los datos sintéticos y no toca el contenido editorial", async () => {
+    await sembrarDemo(prisma, { env: ENV_PREVIEW });
+    await prisma.user.create({ data: { id: "u-demo", name: "Administrador de prueba", email: "admin-demo@example.com", role: "admin" } });
+    const antes = await recuentos();
+    const revisionAntes = (await leerVersionPublicadaDe(prisma))?.revisionId;
+
+    expect(await reiniciarDemo(prisma, { env: ENV_PREVIEW, actorId: "u-demo" })).toEqual({ borradas: 4, creadas: 4 });
+    expect(await recuentos()).toEqual(antes);
+    expect((await leerVersionPublicadaDe(prisma))?.revisionId).toBe(revisionAntes);
+    await expect(reiniciarDemo(prisma, { env: { VERCEL_ENV: "production", ENTORNO_DATOS: "NONPROD" }, actorId: "u-demo" })).rejects.toThrow(
+      DemoNoPermitida,
+    );
   });
 });

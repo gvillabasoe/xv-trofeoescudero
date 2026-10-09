@@ -25,12 +25,12 @@ afterAll(async () => {
 });
 
 describe("estructura", () => {
-  it("crea las 38 tablas del modelo", async () => {
+  it("crea las 39 tablas del modelo (38 de 0001 y SeedRun de 0002)", async () => {
     const { rows } = await consulta(
       `SELECT count(*)::int AS "total" FROM information_schema.tables
        WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> '_prisma_migrations'`,
     );
-    expect(rows[0].total).toBe(38);
+    expect(rows[0].total).toBe(39);
   });
 });
 
@@ -69,7 +69,7 @@ describe("AuditLog es de solo inserción", () => {
   it("deja el actor a NULL al eliminar un usuario, sin perder el registro", async () => {
     await consulta(`INSERT INTO "User" ("id", "name", "email") VALUES ('u-auditoria', 'Prueba', 'prueba@example.com')`);
     await consulta(
-      `INSERT INTO "AuditLog" ("id", "actorId", "action", "entityType", "summary") VALUES ('al-actor', 'u-auditoria', 'USUARIO_CREADO', 'User', 'alta')`,
+      `INSERT INTO "AuditLog" ("id", "actorId", "actorType", "action", "entityType", "summary") VALUES ('al-actor', 'u-auditoria', 'USER', 'USUARIO_CREADO', 'User', 'alta')`,
     );
     await consulta(`DELETE FROM "User" WHERE "id" = 'u-auditoria'`);
     const { rows } = await consulta(`SELECT "actorId", "summary" FROM "AuditLog" WHERE "id" = 'al-actor'`);
@@ -79,7 +79,7 @@ describe("AuditLog es de solo inserción", () => {
   it("no permite aprovechar esa excepción para cambiar otros campos", async () => {
     await consulta(`INSERT INTO "User" ("id", "name", "email") VALUES ('u-truco', 'Prueba', 'truco@example.com')`);
     await consulta(
-      `INSERT INTO "AuditLog" ("id", "actorId", "action", "entityType", "summary") VALUES ('al-truco', 'u-truco', 'USUARIO_CREADO', 'User', 'original')`,
+      `INSERT INTO "AuditLog" ("id", "actorId", "actorType", "action", "entityType", "summary") VALUES ('al-truco', 'u-truco', 'USER', 'USUARIO_CREADO', 'User', 'original')`,
     );
     await expect(
       consulta(`UPDATE "AuditLog" SET "actorId" = NULL, "summary" = 'cambiado' WHERE "id" = 'al-truco'`),

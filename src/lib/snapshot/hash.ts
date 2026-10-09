@@ -9,6 +9,9 @@ export function jsonCanonico(valor: unknown): string {
 }
 
 function ordenarClaves(valor: unknown): unknown {
+  if (valor instanceof Date) {
+    return valor.toISOString();
+  }
   if (Array.isArray(valor)) {
     return valor.map(ordenarClaves);
   }

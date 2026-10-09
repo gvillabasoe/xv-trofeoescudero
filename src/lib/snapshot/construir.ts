@@ -11,6 +11,7 @@ import {
   esquemaSnapshot,
   type SnapshotPublico,
 } from "./esquema";
+import { buscarDatosPrivados } from "./privacidad";
 
 /**
  * Del borrador editable (tablas relacionales) al snapshot público (fase-2 §8).
@@ -368,7 +369,10 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
   };
 }
 
-/** Construye y valida con Zod. Es lo que usa la publicación. */
+/**
+ * Construye (lista blanca), valida con Zod (objetos estrictos) e inspecciona el resultado en busca de datos
+ * privados. Es lo que usa la publicación: si cualquiera de las tres barreras falla, no se publica nada.
+ */
 export function prepararSnapshot(borrador: Borrador): SnapshotPublico {
   const resultado = esquemaSnapshot.safeParse(construirSnapshot(borrador));
   if (!resultado.success) {
@@ -377,6 +381,10 @@ export function prepararSnapshot(borrador: Borrador): SnapshotPublico {
         (problema) => `${problema.path.map(String).join(".") || "snapshot"}: ${problema.message}`,
       ),
     );
+  }
+  const hallazgos = buscarDatosPrivados(resultado.data);
+  if (hallazgos.length > 0) {
+    throw new ErrorPublicacion(hallazgos.map((hallazgo) => `${hallazgo.ruta}: ${hallazgo.motivo}`));
   }
   return resultado.data;
 }
