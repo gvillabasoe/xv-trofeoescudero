@@ -1,16 +1,19 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import { notFound } from "next/navigation";
 import { abreviarCommit, describirEntorno } from "@/lib/entorno";
 import { describirEstadoBase, describirVersionPublicada } from "@/lib/estado-base";
+import { sitioIndexable } from "@/lib/sitio";
 import { leerEstadoBase } from "@/server/estado-base";
 import { leerVersionPublicada } from "@/server/snapshot-publico";
 
-// Página técnica de la Fase 3. Antes del lanzamiento pasa a /admin o se elimina.
+// Página técnica, sin secretos ni datos personales. Desaparece (404) al lanzar la web (SITIO_PUBLICO=si).
 export const metadata: Metadata = {
-  title: "Estado técnico · Trofeo Escudero",
+  title: "Estado técnico",
+  robots: { index: false, follow: false },
 };
 
 export default async function EstadoTecnico() {
+  if (sitioIndexable()) notFound();
   const entorno = describirEntorno(process.env.VERCEL_ENV);
   const rama = process.env.VERCEL_GIT_COMMIT_REF ?? "—";
   const commit = abreviarCommit(process.env.VERCEL_GIT_COMMIT_SHA);
@@ -20,48 +23,35 @@ export default async function EstadoTecnico() {
   const filasVersion = describirVersionPublicada(version);
 
   return (
-    <main id="main" tabIndex={-1} className="contenedor comprobacion">
-      <p className="etiqueta">XV Edición · 3 de agosto de 2027 · Golf El Rompido</p>
-      <h1 className="titular">
-        Estado técnico <em>de la fundación.</em>
-      </h1>
-      <p className="entradilla">
-        Página provisional de la Fase 3. No forma parte de la web pública. Todo lo que muestra se lee
-        durante el build y queda en caché: no hay consultas a la base en cada visita.
-      </p>
-
-      <dl className="tarjeta">
-        <div className="tarjeta__fila">
+    <main id="main" tabIndex={-1} className="pagina">
+      <div className="wrap pagina-head">
+        <p className="eyebrow">Trofeo Escudero · comprobación técnica</p>
+        <h1 className="display">Estado técnico.</h1>
+        <p className="lead">
+          Solo para la organización mientras la web no esté lanzada. Todo lo que muestra se lee durante el build o al
+          publicar, y queda en caché: no hay consultas a la base en cada visita.
+        </p>
+        <dl className="estado-tecnico">
           <dt>Entorno</dt>
           <dd>{entorno}</dd>
-        </div>
-        <div className="tarjeta__fila">
           <dt>Rama</dt>
           <dd>{rama}</dd>
-        </div>
-        <div className="tarjeta__fila">
           <dt>Commit</dt>
           <dd>{commit}</dd>
-        </div>
-        <div className="tarjeta__fila">
           <dt>Node.js del build</dt>
           <dd>{versionNode}</dd>
-        </div>
-        {[...filasBase, ...filasVersion].map((fila) => (
-          <div className="tarjeta__fila" key={fila.etiqueta}>
-            <dt>{fila.etiqueta}</dt>
-            <dd>{fila.etiqueta === "contentHash" || fila.etiqueta === "ID de la revisión" ? <code>{fila.valor}</code> : fila.valor}</dd>
-          </div>
-        ))}
-      </dl>
-
-      <p className="nota">
-        <strong>Sobre la caché:</strong> esta página y la portada se generan en el build y se sirven desde
-        la caché. Que la hora de lectura no cambie al recargar es una pista, no una prueba definitiva. La
-        comprobación fiable está en los logs de Vercel: cada lectura real de Neon deja una línea
-        «[cache:site-public] Lectura real de Neon» con su identificador de lectura. Si una visita no deja esa
-        línea, se ha servido desde la caché. <Link href="/">Ver la portada provisional</Link>.
-      </p>
+          {[...filasBase, ...filasVersion].map((fila) => (
+            <div key={fila.etiqueta} style={{ display: "contents" }}>
+              <dt>{fila.etiqueta}</dt>
+              <dd>{fila.etiqueta === "contentHash" || fila.etiqueta === "ID de la revisión" ? <code>{fila.valor}</code> : fila.valor}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="legal-meta">
+          Cada lectura real de la base deja en los logs de Vercel una línea «[cache:site-public] Lectura real de Neon». Si
+          una visita no deja esa línea, se ha servido desde la caché.
+        </p>
+      </div>
     </main>
   );
 }

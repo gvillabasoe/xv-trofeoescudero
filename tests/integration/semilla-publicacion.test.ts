@@ -183,7 +183,7 @@ describe("publicación", () => {
   });
 
   it("no crea una versión nueva si el contenido no ha cambiado", async () => {
-    expect(await publicar(prisma, { actorId: null })).toEqual({ publicada: false, numero: 2, motivo: "identica" });
+    expect(await publicar(prisma, { actorId: null })).toEqual({ publicada: false, numero: 2, motivo: "identica", avisos: [] });
   });
 
   it("rechaza publicar sobre una versión que ya no es la vigente", async () => {
@@ -198,6 +198,7 @@ describe("publicación", () => {
 
   it("la revisión nº 1 sigue intacta y no se puede modificar", async () => {
     const primera = await prisma.contentRevision.findUniqueOrThrow({ where: { revisionNumber: 1 } });
+    expect(primera.schemaVersion).toBe(2);
     expect(esquemaSnapshot.parse(primera.snapshot).hero.entradilla).not.toBe("Texto del borrador sin publicar");
     await expect(
       prisma.contentRevision.update({ where: { id: primera.id }, data: { publishComment: "cambio" } }),

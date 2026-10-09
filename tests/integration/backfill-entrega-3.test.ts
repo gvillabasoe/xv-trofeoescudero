@@ -1,6 +1,9 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { PrismaClient } from "@/generated/prisma/client";
+import { hashContenido } from "@/lib/snapshot/hash";
+import { leerSnapshotGuardado } from "@/lib/snapshot/leer";
+import { publicar } from "@/server/publicacion";
 import { aplicarBackfills } from "@/server/semilla/backfills";
 import { bootstrap, CLAVE_CONTENIDO_INICIAL } from "@/server/semilla/bootstrap";
 import { leerVersionPublicadaDe } from "@/server/version-publicada";
@@ -92,6 +95,26 @@ describe("instalación de la Entrega 3", () => {
     expect(await prisma.contentRevision.count()).toBe(1);
     expect((await prisma.siteState.findUniqueOrThrow({ where: { id: 1 } })).hasUnpublishedChanges).toBe(true);
     expect(await prisma.auditLog.count({ where: { action: "BACKFILL_APLICADO" } })).toBe(1);
+  });
+
+  it("la revisión nº 1 (esquema 1) se sigue leyendo; publicar crea la nº 2 (esquema 2) sin tocar la nº 1", async () => {
+    const primera = await prisma.contentRevision.findUniqueOrThrow({ where: { revisionNumber: 1 } });
+    const lectura = leerSnapshotGuardado(primera.snapshot);
+    expect(lectura.version).toBe(1);
+    expect(hashContenido(lectura.guardado)).toBe(primera.contentHash);
+    expect(lectura.snapshot.hero.imagen).toBeNull();
+
+    const resultado = await publicar(prisma, { actorId: null, comentario: "Primera publicación con el código nuevo" });
+    expect(resultado).toMatchObject({ publicada: true, numero: 2, avisos: [] });
+    const segunda = await prisma.contentRevision.findUniqueOrThrow({ where: { revisionNumber: 2 } });
+    expect(segunda.schemaVersion).toBe(2);
+    const marcas = leerSnapshotGuardado(segunda.snapshot).snapshot.cierre?.historial.marcas ?? [];
+    expect(marcas.find((marca) => marca.slug === "dalecandela")?.categoria).toBe("Colaboración solidaria");
+    expect(marcas.some((marca) => marca.slug === "castillo-de-cuzcurrita")).toBe(false);
+
+    const otraVez = await prisma.contentRevision.findUniqueOrThrow({ where: { revisionNumber: 1 } });
+    expect(otraVez.contentHash).toBe(primera.contentHash);
+    expect(otraVez.schemaVersion).toBe(1);
   });
 
   it("repetir bootstrap y backfills es un no-op, y lo borrado no reaparece", async () => {

@@ -255,7 +255,7 @@ describe("prepararSnapshot", () => {
   it("falla si un texto obligatorio está vacío", () => {
     const base = borrador();
     const sinNota = { ...base, colaborar: base.colaborar && { ...base.colaborar, transparencyNote: "   " } };
-    expect(() => prepararSnapshot(sinNota)).toThrow(/colaborar\.notaTransparencia/);
+    expect(() => prepararSnapshot(sinNota)).toThrow(/colaborar › notaTransparencia: está vacío/);
   });
 });
 

@@ -40,6 +40,9 @@ describe("servicio de invalidación", () => {
 
     expect(api.updateTag).toHaveBeenCalledExactlyOnceWith("site-public");
     expect(api.revalidatePath.mock.calls.map(([ruta]) => ruta)).toEqual([...RUTAS_SITIO_PUBLICO]);
-    expect(resultado).toEqual({ etiqueta: "site-public", rutas: ["/", "/estado"] });
+    expect(resultado).toEqual({
+      etiqueta: "site-public",
+      rutas: ["/", "/proponer", "/privacidad", "/aviso-legal", "/estado", "/sitemap.xml"],
+    });
   });
 });
