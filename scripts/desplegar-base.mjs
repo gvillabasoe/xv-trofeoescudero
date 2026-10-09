@@ -6,6 +6,7 @@
 // Si algo no cuadra, el build falla y Vercel mantiene el despliegue anterior.
 // Nunca imprime URLs ni credenciales.
 import { neon } from "@neondatabase/serverless";
+import pg from "pg";
 import { leerMigraciones } from "./lib/leer-migraciones.mjs";
 import { calcularPendientes, decidirDestructivas, revisarVariables } from "./lib/migraciones.mjs";
 
@@ -127,7 +128,27 @@ if (errores.length > 0 || !entorno) {
   fallar(errores.join("\n  "));
 }
 
-const sql = neon(/** @type {string} */ (process.env.DIRECT_URL));
+/**
+ * PostgreSQL local (pruebas de extremo a extremo de CI y comprobación local): misma interfaz que `neon()`.
+ * @param {string} url
+ */
+function sqlLocal(url) {
+  const pool = new pg.Pool({ connectionString: url, max: 1 });
+  /** @param {TemplateStringsArray} partes @param {unknown[]} valores */
+  const consulta = async (partes, ...valores) => {
+    const texto = partes.reduce((total, parte, indice) => total + parte + (indice < valores.length ? `$${indice + 1}` : ""), "");
+    const { rows } = await pool.query(texto, valores);
+    return rows;
+  };
+  return Object.assign(consulta, { cerrar: () => pool.end() });
+}
+
+const urlDirecta = /** @type {string} */ (process.env.DIRECT_URL);
+const esLocal = ["localhost", "127.0.0.1"].includes(new URL(urlDirecta).hostname);
+const local = esLocal ? sqlLocal(urlDirecta) : null;
+const sql = /** @type {import("@neondatabase/serverless").NeonQueryFunction<false, false>} */ (
+  /** @type {unknown} */ (local ?? neon(urlDirecta))
+);
 try {
   if (modo === "antes") {
     await antes(sql, entorno);
@@ -135,5 +156,7 @@ try {
     await despues(sql, entorno);
   }
 } catch (error) {
+  await local?.cerrar();
   fallar(`no se pudo consultar la base (${error instanceof Error ? error.message : String(error)}).`);
 }
+await local?.cerrar();

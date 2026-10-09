@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { esquemaSnapshot, type SnapshotPublico } from "@/lib/snapshot/esquema";
+import type { SnapshotPublico } from "@/lib/snapshot/esquema";
+import { leerSnapshotGuardado } from "@/lib/snapshot/leer";
 import type { ConsultasBD } from "@/server/db";
 
 export interface VersionPublicada {
   revisionId: string;
   numero: number;
+  /** Versión de esquema con la que se publicó (1 o 2). */
+  versionEsquema: number;
   contentHash: string;
   publicadaEn: string;
+  /** Siempre en la forma vigente (versión 2): las revisiones antiguas se normalizan al leerlas. */
   snapshot: SnapshotPublico;
   /** Cuándo se leyó de la base. */
   leidaEn: string;
@@ -23,7 +27,14 @@ export async function leerVersionPublicadaDe(bd: ConsultasBD): Promise<VersionPu
     where: { id: 1 },
     select: {
       publishedRevision: {
-        select: { id: true, revisionNumber: true, contentHash: true, publishedAt: true, snapshot: true },
+        select: {
+          id: true,
+          revisionNumber: true,
+          schemaVersion: true,
+          contentHash: true,
+          publishedAt: true,
+          snapshot: true,
+        },
       },
     },
   });
@@ -35,9 +46,10 @@ export async function leerVersionPublicadaDe(bd: ConsultasBD): Promise<VersionPu
   return {
     revisionId: revision.id,
     numero: revision.revisionNumber,
+    versionEsquema: revision.schemaVersion,
     contentHash: revision.contentHash,
     publicadaEn: revision.publishedAt.toISOString(),
-    snapshot: esquemaSnapshot.parse(revision.snapshot),
+    snapshot: leerSnapshotGuardado(revision.snapshot).snapshot,
     leidaEn: new Date().toISOString(),
     lecturaId: randomUUID().slice(0, 8),
   };

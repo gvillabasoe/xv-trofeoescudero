@@ -2,6 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "regions": ["fra1"],
+  "ignoreCommand": "node scripts/subida-completa.mjs",
   "installCommand": "npx --yes pnpm@10.34.6 install --frozen-lockfile",
-  "buildCommand": "npx --yes pnpm@10.34.6 run vercel-build"
+  "buildCommand": "npx --yes pnpm@10.34.6 run vercel-build",
+  "crons": [{ "path": "/api/cron/retencion", "schedule": "0 4 * * *" }]
 }

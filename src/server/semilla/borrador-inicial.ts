@@ -91,6 +91,7 @@ export function borradorInicial(clasificacion: "actual" | "entrega-3" = "actual"
         clasificacion === "entrega-3" && entidad.slug !== "castillo-de-cuzcurrita"
           ? "Sin categoría"
           : nombreCategoria(entidad.categorySlug),
+      categoryRequiresLegalReview: CATEGORIAS.find((categoria) => categoria.slug === entidad.categorySlug)?.requiresLegalReview ?? false,
     })),
   };
 }

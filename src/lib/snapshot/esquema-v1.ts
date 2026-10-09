@@ -12,49 +12,15 @@ import {
   textoOpcional,
 } from "./comun";
 
-export {
-  CAMPOS,
-  CLAVES_VIA,
-  DISPONIBILIDADES,
-  GENERACIONES,
-  TIPOS_COLABORACION,
-  TIPOS_CONCURSO,
-  TIPOS_CONTACTO,
-  TIPOS_ELEMENTO_VIA,
-} from "./comun";
-
 /**
- * Contrato del snapshot publicado (fase-2 §6 y §8): lo único que lee la web pública.
- * - Solo contiene lo público. Los objetos son estrictos: un campo que no esté aquí
- *   (por ejemplo, notas internas o estados comerciales sin publicar) hace fallar la publicación.
- * - Versión 2 (Fase 5): añade las imágenes publicadas. Las revisiones de la versión 1 se siguen leyendo:
- *   leer.ts las normaliza a esta forma, con todas las imágenes a null.
+ * Snapshot versión 1 (Entregas 3 y 4): sin imágenes. Se conserva para leer y verificar las revisiones
+ * publicadas con esa versión (la nº 1, por ejemplo). Las revisiones son inmutables: nunca se reescriben;
+ * al leerlas se normalizan a la versión vigente (leer.ts).
  */
-export const VERSION_ESQUEMA_SNAPSHOT = 2;
+export const VERSION_ESQUEMA_SNAPSHOT_V1 = 1;
 
-/** Ruta pública de una variante, servida por /medios/[archivo]. Sin datos personales ni del archivo original. */
-export const PATRON_URL_MEDIO = /^\/medios\/[a-z0-9]+(?:-[a-z0-9]+)*\.(?:webp|png|jpg)$/;
-
-const urlMedio = z.string().regex(PATRON_URL_MEDIO);
-
-/** Imagen publicada: solo variantes ya generadas, texto alternativo obligatorio y punto focal. */
-export const esquemaImagen = z.strictObject({
-  url: urlMedio,
-  alt: texto,
-  ancho: z.number().int().positive(),
-  alto: z.number().int().positive(),
-  focoX: z.number().min(0).max(1),
-  focoY: z.number().min(0).max(1),
-  pie: textoOpcional,
-  variantes: z.array(z.strictObject({ url: urlMedio, ancho: z.number().int().positive() })).min(1),
-});
-
-export type ImagenPublica = z.infer<typeof esquemaImagen>;
-
-const imagen = esquemaImagen.nullable();
-
-export const esquemaSnapshot = z.strictObject({
-  version: z.literal(VERSION_ESQUEMA_SNAPSHOT),
+export const esquemaSnapshotV1 = z.strictObject({
+  version: z.literal(VERSION_ESQUEMA_SNAPSHOT_V1),
   sitio: z.strictObject({
     nombre: texto,
     edicion: texto,
@@ -64,10 +30,7 @@ export const esquemaSnapshot = z.strictObject({
     localidad: texto,
     afterParty: textoOpcional,
     seo: z.strictObject({ titulo: texto, descripcion: texto }),
-    /** Imagen para compartir en redes (OG). */
-    imagenCompartir: imagen,
   }),
-  /** Solo los canales activos. */
   contacto: z.array(
     z.strictObject({
       tipo: z.enum(TIPOS_CONTACTO),
@@ -88,24 +51,20 @@ export const esquemaSnapshot = z.strictObject({
     ctaSecundario: texto,
     tarjetaMarcas: z.strictObject({ titulo: texto, texto: texto, enlace: texto }),
     cifras: z.array(z.strictObject({ etiqueta: texto, valor: texto, pie: textoOpcional })),
-    imagen,
   }),
-  /** null si el bloque está oculto. */
   familia: z
     .strictObject({
       indice: texto,
       titulo: texto,
-      segundaGeneracion: z.strictObject({ etiqueta: texto, texto: texto, imagen }),
-      terceraGeneracion: z.strictObject({ etiqueta: texto, texto: texto, pie: textoOpcional, imagen }),
+      segundaGeneracion: z.strictObject({ etiqueta: texto, texto: texto }),
+      terceraGeneracion: z.strictObject({ etiqueta: texto, texto: texto, pie: textoOpcional }),
       miembros: z.array(
         z.strictObject({
           nombre: texto,
           generacion: z.enum(GENERACIONES),
           texto: texto,
           pie: textoOpcional,
-          /** Campo editorial manual; null si está vacío. */
           edad: z.number().int().positive().nullable(),
-          foto: imagen,
         }),
       ),
     })
@@ -121,10 +80,9 @@ export const esquemaSnapshot = z.strictObject({
         texto: texto,
         destacado: textoOpcional,
         puente: textoOpcional,
-        imagen,
       }),
-      sur: z.strictObject({ etiqueta: texto, titulo: texto, texto: texto, imagen }),
-      despues: z.strictObject({ etiqueta: texto, titulo: texto, texto: texto, imagen }),
+      sur: z.strictObject({ etiqueta: texto, titulo: texto, texto: texto }),
+      despues: z.strictObject({ etiqueta: texto, titulo: texto, texto: texto }),
       recorrido: z.array(z.strictObject({ etiqueta: texto, hora: textoOpcional })),
     })
     .nullable(),
@@ -149,12 +107,10 @@ export const esquemaSnapshot = z.strictObject({
             clave: texto,
             nombre: texto,
             descripcion: textoOpcional,
-            /** Solo si su interruptor de publicación está activo; si no, null. */
             estado: z.enum(DISPONIBILIDADES).nullable(),
             hoyo: z.number().int().min(1).max(18).nullable(),
           }),
         ),
-        imagen,
       }),
     ),
     concursos: z.strictObject({
@@ -169,7 +125,6 @@ export const esquemaSnapshot = z.strictObject({
           numero: z.number().int().min(1).max(18),
           concurso: z.enum(TIPOS_CONCURSO),
           par: z.number().int().positive().nullable(),
-          /** Solo si showCourse está activo (P8); si no, null. */
           campo: z.enum(CAMPOS).nullable(),
         }),
       ),
@@ -184,7 +139,6 @@ export const esquemaSnapshot = z.strictObject({
         titulo: texto,
         texto: texto,
         etiquetaMuro: texto,
-        /** Solo las marcas que cumplen la regla de publicación. El logo, solo con permiso y revisado. */
         marcas: z.array(
           z.strictObject({
             nombre: texto,
@@ -192,7 +146,6 @@ export const esquemaSnapshot = z.strictObject({
             categoria: texto,
             url: textoOpcional,
             descripcion: textoOpcional,
-            logo: imagen,
           }),
         ),
       }),
@@ -202,9 +155,8 @@ export const esquemaSnapshot = z.strictObject({
       texto: texto,
       microcopy: textoOpcional,
       cta: texto,
-      imagen,
     })
     .nullable(),
 });
 
-export type SnapshotPublico = z.infer<typeof esquemaSnapshot>;
+export type SnapshotV1 = z.infer<typeof esquemaSnapshotV1>;

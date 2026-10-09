@@ -1,3 +1,5 @@
+import { PATRON_URL_MEDIO } from "./esquema";
+
 /**
  * Inspección recursiva del snapshot público (D-SNAPSHOT-WHITELIST).
  * El snapshot ya se construye por lista blanca y se valida con Zod en modo estricto; esto es una
@@ -75,7 +77,8 @@ export function buscarDatosPrivados(valor: unknown, opciones: OpcionesInspeccion
 
   const visitar = (actual: unknown, ruta: string) => {
     if (typeof actual === "string") {
-      const enContacto = RUTAS_CONTACTO.test(ruta);
+      // Rutas de imágenes publicadas (/medios/…): identificadores generados, no datos personales.
+      const enContacto = RUTAS_CONTACTO.test(ruta) || PATRON_URL_MEDIO.test(actual);
       if (!enContacto && PATRON_EMAIL.test(actual)) hallazgos.push({ ruta, motivo: "contiene un email" });
       if (!enContacto && PATRON_TELEFONO.test(actual)) hallazgos.push({ ruta, motivo: "contiene un teléfono" });
       if (PATRON_PENDIENTE.test(actual)) hallazgos.push({ ruta, motivo: "contiene «[PENDIENTE]»" });

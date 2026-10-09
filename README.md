@@ -1,166 +1,90 @@
 # Trofeo Escudero · XV Edición
 
-Web app del Trofeo Escudero: landing pública con contenido gestionable y un panel privado de administración.
+Web del Trofeo Escudero (3 de agosto de 2027, Golf El Rompido): una landing pública para atraer patrocinadores y colaboradores, un formulario de propuestas que se guarda en Neon y un panel privado (`/admin`) para gestionar todo el contenido.
 
-**Estado:** Fase 3 · **Entrega 4**:
-- **4A:** saneamiento de datos y publicación sobre la instalación de la Entrega 3, sin reinicializar nada.
-- **4B:** Better Auth, alta inicial, TOTP obligatorio y acceso al panel.
+**Estado:** versión 0.9.0, todas las fases construidas (F4 web pública, F5 CMS, F6 bandeja, F7 QA, F8 documentación). **La web no está lanzada:** sigue protegida por Vercel y marcada como «noindex» hasta que la organización complete la [lista de lanzamiento](docs/lanzamiento.md).
 
-Todavía no hay CMS, imágenes ni formulario público (fases siguientes).
+| Documento | Para qué |
+|---|---|
+| [docs/manual-panel.md](docs/manual-panel.md) | Manual del panel para la organización |
+| [docs/operacion.md](docs/operacion.md) | Variables, servicios, tarea diaria, copias, recuperación e incidencias |
+| [docs/lanzamiento.md](docs/lanzamiento.md) | Lista de comprobación del lanzamiento (no se lanza sin ella) |
 
 ## Stack
 | Pieza | Versión exacta |
 |---|---|
 | Node.js | 22.23.3 LTS en CI (`.nvmrc`); `22.x` en Vercel |
-| pnpm | 10.34.6 (`packageManager` en CI; en Vercel, `npx pnpm@10.34.6` en `vercel.json`) |
+| pnpm | 10.34.6 (`packageManager`; en Vercel, `npx pnpm@10.34.6`) |
 | Next.js (App Router, Cache Components) | 16.4.0 |
 | React | 19.3.0 |
 | TypeScript | 6.0.3 |
 | ESLint (flat) + eslint-config-next | 9.39.5 + 16.4.0 |
-| Vitest | 5.0.3 |
-| Prisma ORM (`prisma`, `@prisma/client`, `@prisma/adapter-neon`; `@prisma/adapter-pg` solo en tests) | 7.10.0 |
-| Driver de Neon (`@neondatabase/serverless`) | 1.2.0 |
+| Prisma ORM + adaptadores Neon y PostgreSQL | 7.10.0 |
+| Better Auth (twoFactor, admin, nextCookies) | 1.7.7 |
 | Zod | 4.6.5 |
-| tsx | 4.23.15 |
-| Better Auth (plugins `twoFactor`, `admin` y `nextCookies`) | 1.7.7 |
-| uqr (QR del TOTP, sin dependencias) | 0.1.3 |
-| PostgreSQL | Neon (Fráncfort); PostgreSQL 17 temporal en CI |
+| Vercel Blob (almacén privado) | 2.8.1 |
+| sharp (variantes WebP/JPEG) | 0.35.5 |
+| Vitest · Playwright · axe-core | 5.0.3 · 1.64.0 · 4.13.0 |
+| PostgreSQL | Neon (Fráncfort); PostgreSQL 17 desechable en CI |
 
-## Dependencias reproducibles (D-LOCKFILE)
-- `pnpm-lock.yaml` está versionado y **nunca se borra**.
-- CI y Vercel instalan **solo** con `pnpm install --frozen-lockfile`. Si el lockfile falta o no corresponde a `package.json`, CI falla y el despliegue no continúa.
-- **Si una entrega cambia dependencias:** el lockfile se genera con pnpm 10.34.6 antes de entregarla y viaja en el mismo ZIP. `package.json` y `pnpm-lock.yaml` llegan juntos, en un único commit.
-- **Red de seguridad:** si alguna vez no coinciden, el job «Lockfile» de CI falla y publica el lockfile correcto como artefacto.
-
-## Rutas (provisionales)
+## Rutas
 | Ruta | Qué es |
 |---|---|
-| `/` | Portada provisional: lee solo la versión publicada (`ContentRevision`) |
-| `/estado` | Estado técnico, sin secretos. Muestra: conexión, marcador, migraciones, ejecuciones únicas, propuestas sintéticas, ID, número y `contentHash` de la revisión, y hora e identificador de lectura |
-| `/admin/login` | Acceso: contraseña y, después, código TOTP o código de recuperación |
-| `/admin/alta-inicial` | Alta del primer administrador. 404 real en cuanto existe uno o si falta `ADMIN_SETUP_SECRET` |
-| `/admin/seguridad` | Activar TOTP (obligatorio), regenerar códigos de recuperación y gestionar las sesiones propias |
-| `/admin` | Dashboard técnico provisional. El reset de datos demo solo aparece en Preview |
+| `/` | Portada: los cinco bloques (Hero y cifras, La familia, El día, Colaborar, ediciones anteriores y cierre), leídos de la versión publicada |
+| `/proponer` | Formulario de propuestas. Funciona sin JavaScript. Cerrado mientras no haya política de privacidad publicada |
+| `/privacidad`, `/aviso-legal` | Última versión publicada de cada texto legal (404 si no hay ninguna) |
+| `/medios/[archivo]` | Variantes web de las imágenes autorizadas, desde el almacén privado (deja de servirlas al retirarlas) |
+| `/compartir` | Imagen para redes por defecto (tipográfica) |
+| `/estado` | Estado técnico sin secretos. Desaparece al lanzar |
+| `/api/cron/retencion` | Tarea diaria de retención (Vercel Cron, con `CRON_SECRET`) |
+| `/admin/*` | Panel: acceso con contraseña + TOTP, CMS, imágenes, publicación, versiones, bandeja, actividad y seguridad |
 
-No hay endpoints HTTP de Better Auth (`/api/auth/*`): el panel usa Server Actions que llaman a Better Auth en el servidor. Así hay menos superficie expuesta, y la subida web de GitHub no admite la carpeta `[...all]` que necesitarían.
+## Cómo funciona el contenido
+1. **Borrador:** lo que se edita en el panel vive en tablas relacionales (Neon), con **control de versión optimista**: si dos personas editan lo mismo, la segunda no pisa a la primera.
+2. **Publicar:** crea una **revisión inmutable** (snapshot) que pasa tres barreras: lista blanca campo a campo, Zod estricto e inspección recursiva de privacidad (emails, teléfonos, «[PENDIENTE]» y propiedades privadas). Después invalida la caché `site-public`.
+3. **Web pública:** solo lee la revisión publicada, en caché (`'use cache'` + `cacheTag("site-public")` + `cacheLife("max")`). No consulta Neon en cada visita.
+4. **Versiones:** se puede restaurar cualquiera; se publica como versión nueva y antes se revisa con los derechos de hoy (marcas, imágenes y canales).
 
-## Autenticación y panel (Entrega 4B)
-- **Identidad:** `User` de Better Auth es la identidad canónica; no hay tabla AdminUser paralela.
-  - El registro público está desactivado.
-  - Un hook rechaza **cualquier** creación de usuarios desde Better Auth.
-  - El único alta es la inicial.
-- **Alta inicial** (`src/server/auth/alta-inicial.ts`). Pide el secreto de Vercel `ADMIN_SETUP_SECRET`, que se compara en tiempo constante. Después:
-  1. Limita los intentos por huella HMAC.
-  2. En una transacción con cerrojo, comprueba que no hay ningún administrador.
-  3. Crea usuario, credencial, perfil y auditoría.
-  4. A partir de ahí, el proxy responde 404.
-- **TOTP obligatorio:** sin TOTP activo solo se entra en `/admin/seguridad`.
-  - Los códigos de recuperación se muestran una sola vez y sirven una sola vez.
-- **Protección:**
-  - `src/proxy.ts` redirige sin cookie de sesión.
-  - La autorización real (`guardas.ts`) se hace en cada página y Server Action: sesión en Neon, rol `admin`, cuenta no bloqueada y TOTP.
-- **Rate limiting:**
-  - El acceso y el alta inicial limitan los intentos con `AbuseCounter` y una huella HMAC de la IP. La IP en bruto nunca se guarda.
-  - Better Auth bloquea además el TOTP tras varios códigos fallidos.
-  - Su rate limiting en base de datos queda configurado para el caso de que algún día se publiquen sus endpoints HTTP.
-- **Auditoría** de alta, accesos, fallos, límites, TOTP, códigos, revocaciones, cierre de sesión y reset demo.
-  - Sin emails, contraseñas, códigos, tokens ni IP.
-- **IP y user agent** de las sesiones: solo seguridad. Se borran con la sesión y nunca van a `AuditLog` (§16.1).
+Snapshot **versión 2** (añade imágenes). Las revisiones de la versión 1 (Entregas 3 y 4) se leen normalizadas y nunca se reescriben (`src/lib/snapshot/leer.ts`).
 
-## Base de datos
-- **Migraciones versionadas** en `prisma/migrations/`. Nunca `db push`.
-  - Todas son **aditivas** y compatibles con el código anterior: expandir → migrar → contraer.
-- **0001_inicial:** modelo completo.
-- **0002_seedrun:**
-  - `SeedRun` y `AuditLog.actorType` (las filas antiguas quedan como `SYSTEM`).
-  - `Sponsor.currentRoleLabel` y `Sponsor.editionsNote`.
-  - Valores nuevos de enums.
-  - Revisiones publicadas **inmutables** (trigger) y con huella válida (CHECK).
-- **Reglas SQL escritas a mano:**
-  - Singletons.
-  - Hoyos 1–18.
-  - MediaUsage con un solo destino.
-  - AuditLog de solo inserción.
-  - ContentRevision inmutable.
-  - Una acción del sistema nunca tiene usuario.
+### Reglas de publicación
+- **Marcas:** confirmada, visible, activa y sin bloqueo jurídico; si su categoría exige revisión jurídica (bodega / vino), solo con la revisión **aprobada**. Castillo de Cuzcurrita sigue oculto. Logo solo con permiso «Autorizado».
+- **Imágenes:** autorizadas, con texto alternativo, consentimiento si aparecen personas y autorización de los tutores si aparecen menores. Las que no cumplen se quedan fuera con un aviso.
+- **Estados comerciales:** privados; solo se publican con el interruptor de cada oportunidad. **Campo de los hoyos (P8):** solo con su interruptor.
+- **Canales de contacto:** solo los activos.
 
-## Datos
-### Bootstrap de una sola ejecución (D-BOOTSTRAP)
-`db:bootstrap` (`scripts/sembrar.ts`) se ejecuta en cada build de Vercel y hace una de estas tres cosas:
+## Formulario y bandeja
+- Validación con los textos aprobados (fase-1 §6). Sin JavaScript funciona igual; con JavaScript se envía sin recargar y no pierde lo escrito si falla la red.
+- Antispam sin servicios externos: límite de 5 envíos por 15 minutos por huella HMAC de la IP (la IP nunca se guarda), campo trampa y trampa de tiempo. Cloudflare Turnstile está **preparado y desactivado**.
+- Consentimiento ligado a la versión exacta de la política de privacidad (`LegalVersion`).
+- La propuesta se guarda primero en Neon. El aviso por email (Resend) es opcional y no lleva datos personales.
+- Bandeja: filtros, estados con historial, notas internas, archivo, anonimización y borrado con doble confirmación, y exportación CSV auditada (sin datos demo, protegida contra fórmulas).
+- Retención diaria: anonimiza las propuestas sin actividad (24 meses por defecto, configurable), borra huellas y sesiones caducadas, recorta la auditoría antigua y los archivos de imágenes retiradas.
 
-| Situación | Qué hace |
+## Seguridad
+- Better Auth: registro público desactivado; ningún camino de Better Auth puede crear usuarios; sesiones en Neon de 12 h; **TOTP obligatorio**; códigos de recuperación de un solo uso.
+- Autorización real en cada página y acción (`requerirAdmin`); el proxy solo redirige sin cookie.
+- Auditoría de solo inserción (trigger SQL) sin emails, teléfonos, mensajes, contraseñas, códigos ni IP.
+- Cabeceras de seguridad; panel con `no-store`, `no-referrer` y `noindex`. **CSP con nonce: pendiente** (riesgo documentado).
+- Ningún secreto en el repositorio: solo nombres en `.env.example`.
+
+## Base de datos y despliegue
+- Migraciones versionadas y aditivas (`prisma/migrations`, nunca `db push`). Esta versión **no añade migraciones**.
+- `vercel-build`: `prisma generate` → comprobaciones (`desplegar-base.mjs antes`) → `prisma migrate deploy` → marcador de entorno → bootstrap de una sola ejecución y backfills (`sembrar.ts`) → `next build`.
+- **Subida por lotes (D-SUBIDA-POR-LOTES):** `manifiesto-subida.json` lista la huella de cada archivo. Mientras falte alguno, Vercel omite el despliegue (`ignoreCommand`) y CI omite las pruebas.
+
+## CI (sin secretos)
+| Job | Qué comprueba |
 |---|---|
-| `initial-content-v1` ya está en `SeedRun` | **Nada.** No busca registros borrados ni resucita nada |
-| La base ya tiene contenido (Entrega 3) | **Verifica** que es coherente y **solo registra** `SeedRun`. Comprueba: contenido, oportunidades principales, 18 hoyos, revisión nº 1 válida y con su huella, y `SiteState`. Si falta algo, falla con el diagnóstico y no rellena nada |
-| Las tablas funcionales están vacías | Crea todo, publica la revisión nº 1, audita (actor `SYSTEM`) y registra `SeedRun` en **una transacción** |
-
-Dos ejecuciones simultáneas se ordenan con un cerrojo de PostgreSQL; la clave única de `SeedRun` impide duplicar.
-
-### Backfills (`src/server/semilla/backfills.ts`)
-- Son explícitos, versionados, idempotentes, reanudables y auditados.
-- Se registran en `SeedRun` (`kind = BACKFILL`).
-- Nunca recrean lo borrado, nunca reactivan lo oculto y nunca tocan lo editado desde el panel.
-- **`entidades-historicas-v1`:**
-  - Crea las categorías «AfterParty oficial» y «Colaboración solidaria».
-  - Luz de Mar: su papel actual (AfterParty oficial).
-  - dalecandELA: colaboración solidaria de la X edición.
-  - El cambio queda en el borrador; no publica.
-
-### 18 entidades históricas registradas (D-HISTORICAL-RELATION)
-Las 17 de la información v3 y Castillo de Cuzcurrita.
-- Cuando la fuente no dice si una entidad fue patrocinadora o colaboradora: `PATROCINADOR_O_COLABORADOR`.
-- **Castillo de Cuzcurrita:** patrocinador histórico confirmado, bodega / vino, **oculto**, revisión jurídica **pendiente**.
-- **dalecandELA:** colaboración solidaria especial (X edición).
-- **Luz de Mar:** relación histórica y papel actual de AfterParty oficial.
-
-«Sin categoría» es solo una categoría comercial.
-
-### Datos demo (D-DEMO)
-- Están en `src/server/semilla/demo.ts`, **separados** del bootstrap.
-- **Nunca** se crean en un despliegue.
-- Solo `db:seed:demo` o el reset del panel (Entrega 4B) los crean. Requisitos:
-  - Vercel en `development` o `preview` (nunca `production`);
-  - `ENTORNO_DATOS=NONPROD`;
-  - el marcador de la base en `NONPROD`;
-  - si se configura `PRODUCCION_DB_HOST`, una conexión distinta de esa.
-- Si se borran, no vuelven.
-- El reset solo borra y recrea propuestas con `isSynthetic = true`.
-
-## Publicación y snapshot (D-SNAPSHOT-WHITELIST)
-El snapshot pasa tres barreras independientes:
-1. **Lista blanca:** se construye campo a campo; nunca se serializa una entidad de Prisma.
-2. **Zod estricto:** un campo no previsto hace fallar la publicación.
-3. **Inspección recursiva** (`src/lib/snapshot/privacidad.ts`): nombres de propiedad, textos, objetos y arrays. Busca emails, teléfonos, «[PENDIENTE]» y propiedades privadas.
-
-Publicar crea una revisión inmutable con su huella, en una transacción con control de versión y auditoría.
-
-## Caché (D-CACHE-TAG)
-- La web pública lee la versión publicada con `'use cache'` + `cacheTag("site-public")` + `cacheLife("max")`.
-- Cada lectura real de Neon deja en los logs de Vercel la línea `[cache:site-public] Lectura real de Neon · revisión nº N · lectura XXXX`.
-- `src/server/cache/invalidacion.ts`: servicio de invalidación (`updateTag("site-public")` + `revalidatePath` de las rutas públicas). Está probado de forma aislada y lo usará la acción de publicación del panel.
-
-## Build de Vercel (`vercel-build`)
-1. `prisma generate`.
-2. `scripts/desplegar-base.mjs antes`: variables, marcador, migraciones a medias y destructivas sin confirmar.
-3. `prisma migrate deploy`.
-4. `scripts/desplegar-base.mjs despues`: marcador de entorno.
-5. `tsx scripts/sembrar.ts`: bootstrap (no-op si ya está registrado) y backfills pendientes. Son operaciones cortas.
-6. `next build`.
-
-## CI (D-CI-POSTGRES)
-GitHub Actions, **sin secretos**, en cada PR y en cada subida a `main`:
-- **Calidad:** lint, typecheck, tests unitarios y build.
-- **Migraciones y datos:** un **PostgreSQL 17 temporal** del propio job, que se crea al empezar y se destruye al terminar. Tiene tres bases:
-  1. Migraciones desde cero, comprobación de deriva y reglas SQL.
-  2. Base nueva: bootstrap, segunda ejecución como no-op, ejecuciones simultáneas, registros borrados que no vuelven, datos demo, snapshot, publicación y caché.
-  3. Instalación equivalente a la Entrega 3 (`tests/fixtures/cargar-entrega-3.ts`) que recibe la 0002, el registro de `SeedRun` y el backfill.
-  4. Autenticación: alta inicial (y su concurrencia), registro desactivado, contraseña, activación y verificación de TOTP, códigos de recuperación de un solo uso, sesiones, cierre de sesión y límite de intentos.
-     - Los secretos son aleatorios, se generan en cada ejecución y solo existen dentro del job.
-- **Lockfile:** que `pnpm-lock.yaml` corresponde a `package.json`.
+| Subida completa | Que el repositorio coincide con el manifiesto de la entrega |
+| Calidad | Validación del esquema, lint, typecheck, tests unitarios y build sin base de datos |
+| Migraciones y datos | PostgreSQL 17 desechable con cinco bases: migraciones y deriva, bootstrap, instalación de la Entrega 3 (revisión en esquema 1), autenticación y CMS/propuestas/retención |
+| Extremo a extremo | Build y `next start` contra PostgreSQL desechable: web pública, accesibilidad (axe), menú y diálogos, alta y TOTP, CMS, textos legales, publicación, formulario con y sin JavaScript, bandeja, CSV, imágenes y retención |
+| Lockfile | Que `pnpm-lock.yaml` corresponde a `package.json` |
 
 Nunca se usan Neon, la base de preview, claves de API ni datos reales.
 
 ## Reglas
-- **Ningún secreto en GitHub.** Los valores viven en las variables de Vercel.
-- Hasta el lanzamiento, los despliegues de Vercel son entornos **protegidos y no productivos**: solo datos sintéticos.
+- **No se inventan datos ni se publica información interna** (prospección, contactos de marcas, estados comerciales sin publicar, marcas candidatas).
+- Hasta el lanzamiento, los despliegues son entornos protegidos y no productivos.
 - No se reinicializa la base: cualquier cambio de datos es una migración aditiva, un backfill versionado o una corrección de código, con tests.

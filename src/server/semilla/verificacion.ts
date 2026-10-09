@@ -1,4 +1,4 @@
-import { esquemaSnapshot } from "@/lib/snapshot/esquema";
+import { intentarLeerSnapshot } from "@/lib/snapshot/leer";
 import { hashContenido } from "@/lib/snapshot/hash";
 import type { ConsultasBD } from "@/server/db";
 import { BLOQUES, OPORTUNIDADES_PRINCIPALES, VIAS } from "./datos";
@@ -103,10 +103,11 @@ export async function verificarInstalacionExistente(
     problemas.push("falta la revisión publicada nº 1");
   } else {
     if (primera.schemaVersion < 1) problemas.push("la revisión nº 1 no tiene versión de esquema válida");
-    const lectura = esquemaSnapshot.safeParse(primera.snapshot);
-    if (!lectura.success) {
+    // Se valida con el esquema de SU versión: la revisión nº 1 de la Entrega 3 es de la versión 1.
+    const lectura = intentarLeerSnapshot(primera.snapshot);
+    if (!lectura || lectura.version !== primera.schemaVersion) {
       problemas.push("el snapshot de la revisión nº 1 no es válido");
-    } else if (hashContenido(lectura.data) !== primera.contentHash) {
+    } else if (hashContenido(lectura.guardado) !== primera.contentHash) {
       problemas.push("la huella (contentHash) de la revisión nº 1 no corresponde a su snapshot");
     }
     revisionPublicada = {

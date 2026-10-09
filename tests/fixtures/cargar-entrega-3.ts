@@ -6,6 +6,7 @@ import { Client } from "pg";
 import { prepararSnapshot } from "@/lib/snapshot/construir";
 import { hashContenido } from "@/lib/snapshot/hash";
 import { borradorInicial } from "@/server/semilla/borrador-inicial";
+import { aSnapshotV1 } from "../helpers/snapshot-v1";
 import {
   BLOQUES,
   CIERRE,
@@ -176,7 +177,8 @@ try {
   }
 
   // Revisión publicada nº 1 y estado, como los dejó la publicación del seed de la Entrega 3.
-  const snapshot = prepararSnapshot(borradorInicial("entrega-3"));
+  // Versión de esquema 1, como la publicó la Entrega 3 (sin imágenes).
+  const snapshot = aSnapshotV1(prepararSnapshot(borradorInicial("entrega-3")));
   const revisionId = id();
   const ahora = new Date().toISOString();
   await insertar("ContentRevision", [

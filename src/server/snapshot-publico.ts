@@ -30,3 +30,61 @@ export async function leerVersionPublicada(): Promise<VersionPublicada | null> {
   );
   return version;
 }
+
+export interface DocumentoLegal {
+  /** Id de la LegalVersion: es lo que se acepta en el formulario. */
+  id: string;
+  slug: string;
+  titulo: string;
+  etiquetaVersion: string;
+  cuerpo: string;
+  publicadoEn: string;
+}
+
+export interface LegalesPublicos {
+  privacidad: DocumentoLegal | null;
+  avisoLegal: DocumentoLegal | null;
+}
+
+/**
+ * Última versión publicada de cada texto legal (LegalVersion, inmutable). Misma etiqueta de caché: publicar
+ * una versión legal invalida «site-public». Sin versión publicada, la página no existe (404) y, en el caso de
+ * la privacidad, el formulario de /proponer permanece cerrado.
+ */
+export async function leerLegales(): Promise<LegalesPublicos> {
+  "use cache";
+  cacheTag(ETIQUETA_SITIO_PUBLICO);
+  cacheLife("max");
+
+  if (!hayBaseDeDatos()) return { privacidad: null, avisoLegal: null };
+  const versiones = await obtenerPrisma().legalVersion.findMany({
+    where: { legalPage: { slug: { in: ["privacidad", "aviso-legal"] } } },
+    orderBy: { publishedAt: "desc" },
+    select: {
+      id: true,
+      versionLabel: true,
+      body: true,
+      publishedAt: true,
+      legalPage: { select: { slug: true, title: true } },
+    },
+  });
+  const ultima = (slug: string): DocumentoLegal | null => {
+    const version = versiones.find((candidata) => candidata.legalPage.slug === slug);
+    return version
+      ? {
+          id: version.id,
+          slug,
+          titulo: version.legalPage.title,
+          etiquetaVersion: version.versionLabel,
+          cuerpo: version.body,
+          publicadoEn: version.publishedAt.toISOString(),
+        }
+      : null;
+  };
+  return { privacidad: ultima("privacidad"), avisoLegal: ultima("aviso-legal") };
+}
+
+/** ¿Hay enlace a cada texto legal en el pie? */
+export function legalesPublicados(legales: LegalesPublicos) {
+  return { privacidad: legales.privacidad !== null, avisoLegal: legales.avisoLegal !== null };
+}

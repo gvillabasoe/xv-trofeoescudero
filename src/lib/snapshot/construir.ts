@@ -9,6 +9,7 @@ import {
   TIPOS_ELEMENTO_VIA,
   VERSION_ESQUEMA_SNAPSHOT,
   esquemaSnapshot,
+  type ImagenPublica,
   type SnapshotPublico,
 } from "./esquema";
 import { buscarDatosPrivados } from "./privacidad";
@@ -20,6 +21,39 @@ import { buscarDatosPrivados } from "./privacidad";
 
 type Uno<T extends readonly string[]> = T[number];
 type ClaveBloque = "HERO" | "FAMILIA" | "EL_DIA" | "COLABORAR" | "CIERRE";
+
+export type PermisoLogo = "PENDIENTE" | "AUTORIZADO" | "DENEGADO" | "NO_APLICA";
+
+/** Un archivo de la biblioteca, con lo necesario para decidir si se puede publicar. */
+export interface MedioBorrador {
+  id: string;
+  kind: "FOTO" | "LOGO" | "ILUSTRACION";
+  reviewState: "SUBIDA" | "EN_REVISION" | "AUTORIZADA" | "PUBLICADA" | "RETIRADA";
+  retirada: boolean;
+  altText: string | null;
+  caption: string | null;
+  focalX: number;
+  focalY: number;
+  width: number;
+  height: number;
+  hasIdentifiablePeople: boolean;
+  includesMinors: boolean;
+  consentConfirmed: boolean;
+  guardianConsentConfirmed: boolean;
+  variants: Array<{ format: "WEBP" | "AVIF" | "PNG" | "JPEG"; width: number; publicPathname: string }>;
+}
+
+/** Un medio asignado a un hueco. `orden` distingue huecos del mismo contenido (p. ej., Norte, Sur, Hoyo 19). */
+export interface UsoMedio {
+  orden: number;
+  medio: MedioBorrador;
+}
+
+/** Orden de los huecos que comparten contenido. */
+export const HUECOS = {
+  familia: { segunda: 1, tercera: 2 },
+  dia: { norte: 1, sur: 2, despues: 3 },
+} as const;
 
 /** Lo que se lee de la base para publicar. Los campos privados se incluyen a propósito para poder excluirlos. */
 export interface Borrador {
@@ -33,6 +67,7 @@ export interface Borrador {
     afterPartyName: string | null;
     seoTitle: string;
     seoDescription: string;
+    imagenes?: UsoMedio[];
   } | null;
   contacto: Array<{
     type: Uno<typeof TIPOS_CONTACTO>;
@@ -61,6 +96,7 @@ export interface Borrador {
       isVisible: boolean;
       internalSource: string | null;
     }>;
+    imagenes?: UsoMedio[];
   } | null;
   familia: {
     title: string;
@@ -76,7 +112,9 @@ export interface Borrador {
       caption: string | null;
       ageManual: number | null;
       isVisible: boolean;
+      imagenes?: UsoMedio[];
     }>;
+    imagenes?: UsoMedio[];
   } | null;
   dia: {
     title: string;
@@ -93,6 +131,7 @@ export interface Borrador {
     afterTitle: string;
     afterText: string;
     steps: Array<{ label: string; time: string | null; isVisible: boolean }>;
+    imagenes?: UsoMedio[];
   } | null;
   colaborar: {
     titleLine1: string;
@@ -121,6 +160,7 @@ export interface Borrador {
     closingText: string;
     closingMicrocopy: string | null;
     closingCtaLabel: string;
+    imagenes?: UsoMedio[];
   } | null;
   vias: Array<{
     key: Uno<typeof CLAVES_VIA>;
@@ -142,6 +182,7 @@ export interface Borrador {
       isVisible: boolean;
       holeNumber: number | null;
     }>;
+    imagenes?: UsoMedio[];
   }>;
   hoyos: Array<{
     number: number;
@@ -161,6 +202,10 @@ export interface Borrador {
     url: string | null;
     shortDescription: string | null;
     category: string;
+    /** La categoría exige revisión jurídica (p. ej., bodega / vino): solo se publica con la revisión APROBADA. */
+    categoryRequiresLegalReview?: boolean;
+    logoPermission?: PermisoLogo;
+    imagenes?: UsoMedio[];
   }>;
 }
 
@@ -175,23 +220,74 @@ export class ErrorPublicacion extends Error {
   }
 }
 
-/** Regla de publicación de patrocinadores (fase-2 §6): confirmado, visible, activo y sin bloqueo jurídico. */
+/**
+ * Regla de publicación de patrocinadores (fase-2 §6): confirmado, visible, activo y sin bloqueo jurídico.
+ * Si su categoría exige revisión jurídica, la revisión tiene que estar APROBADA.
+ */
 export function esPatrocinadorPublicable(patrocinador: Borrador["patrocinadores"][number]): boolean {
-  return (
-    patrocinador.confirmed &&
-    patrocinador.publicVisibility &&
-    patrocinador.lifecycle === "ACTIVO" &&
-    (patrocinador.legalReview === "NO_REQUERIDA" || patrocinador.legalReview === "APROBADA")
-  );
+  const revisionValida = patrocinador.categoryRequiresLegalReview
+    ? patrocinador.legalReview === "APROBADA"
+    : patrocinador.legalReview === "NO_REQUERIDA" || patrocinador.legalReview === "APROBADA";
+  return patrocinador.confirmed && patrocinador.publicVisibility && patrocinador.lifecycle === "ACTIVO" && revisionValida;
+}
+
+/** Por qué un medio no se puede publicar; null si se puede. */
+export function motivoMedioNoPublicable(
+  medio: MedioBorrador,
+  opciones: { esLogo?: boolean; permisoLogo?: PermisoLogo; formato?: "WEBP" | "JPEG" } = {},
+): string | null {
+  if (medio.retirada || medio.reviewState === "RETIRADA") return "está retirada";
+  if (medio.reviewState !== "AUTORIZADA" && medio.reviewState !== "PUBLICADA") return "todavía no está autorizada";
+  if (!medio.altText?.trim()) return "le falta el texto alternativo";
+  if (medio.hasIdentifiablePeople && !medio.consentConfirmed) return "aparecen personas y falta confirmar su consentimiento";
+  if (medio.includesMinors && !medio.guardianConsentConfirmed) {
+    return "aparecen menores y falta confirmar la autorización de sus tutores";
+  }
+  if (opciones.esLogo && opciones.permisoLogo !== "AUTORIZADO") return "la marca no ha autorizado el uso de su logo";
+  const formato = opciones.formato ?? "WEBP";
+  if (!medio.variants.some((variante) => variante.format === formato)) return "no tiene versiones web generadas";
+  return null;
+}
+
+/** Ancho por defecto de la imagen (el resto va en `variantes`). */
+const ANCHO_PREFERIDO = 1280;
+
+/** WebP para la web; JPEG solo para la imagen de compartir en redes. */
+export function aImagenPublica(medio: MedioBorrador, formato: "WEBP" | "JPEG" = "WEBP"): ImagenPublica {
+  const variantes = medio.variants
+    .filter((variante) => variante.format === formato)
+    .sort((a, b) => a.width - b.width)
+    .map((variante) => ({ url: `/medios/${variante.publicPathname}`, ancho: variante.width }));
+  const principal = [...variantes].reverse().find((variante) => variante.ancho <= ANCHO_PREFERIDO) ?? variantes[0];
+  return {
+    url: principal?.url ?? "",
+    alt: medio.altText?.trim() ?? "",
+    ancho: medio.width,
+    alto: medio.height,
+    focoX: medio.focalX,
+    focoY: medio.focalY,
+    pie: medio.caption?.trim() || null,
+    variantes,
+  };
 }
 
 function bloque(borrador: Borrador, clave: ClaveBloque) {
   return borrador.bloques.find((seccion) => seccion.key === clave) ?? null;
 }
 
-/** Construye el objeto público, sin validar. Lanza ErrorPublicacion si falta algo imprescindible. */
-export function construirSnapshot(borrador: Borrador): SnapshotPublico {
+export interface ResultadoConstruccion {
+  snapshot: SnapshotPublico;
+  /** Lo que no se publica y conviene saber (no impide publicar). */
+  avisos: string[];
+  /** Ids de los medios incluidos en el snapshot (RevisionMediaRef). */
+  medios: string[];
+}
+
+/** Construye el objeto público, sin validar, con los avisos de lo que se ha dejado fuera. */
+export function construirSnapshotDetallado(borrador: Borrador): ResultadoConstruccion {
   const motivos: string[] = [];
+  const avisos: string[] = [];
+  const medios = new Set<string>();
   const { sitio, hero, colaborar } = borrador;
   const bloqueHero = bloque(borrador, "HERO");
   const bloqueColaborar = bloque(borrador, "COLABORAR");
@@ -203,12 +299,31 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
     throw new ErrorPublicacion(motivos);
   }
 
+  /** Elige la imagen de un hueco; si no se puede publicar, la deja fuera con un aviso. */
+  const imagen = (
+    usos: UsoMedio[] | undefined,
+    hueco: string,
+    opciones: { orden?: number; esLogo?: boolean; permisoLogo?: PermisoLogo; formato?: "WEBP" | "JPEG" } = {},
+  ): ImagenPublica | null => {
+    const uso = (usos ?? [])
+      .filter((candidato) => opciones.orden === undefined || candidato.orden === opciones.orden)
+      .sort((a, b) => a.orden - b.orden)[0];
+    if (!uso) return null;
+    const motivo = motivoMedioNoPublicable(uso.medio, opciones);
+    if (motivo) {
+      avisos.push(`La imagen de ${hueco} no se publica: ${motivo}.`);
+      return null;
+    }
+    medios.add(uso.medio.id);
+    return aImagenPublica(uso.medio, opciones.formato);
+  };
+
   const bloqueFamilia = bloque(borrador, "FAMILIA");
   const bloqueDia = bloque(borrador, "EL_DIA");
   const bloqueCierre = bloque(borrador, "CIERRE");
   const { familia, dia, cierre } = borrador;
 
-  return {
+  const snapshot: SnapshotPublico = {
     version: VERSION_ESQUEMA_SNAPSHOT,
     sitio: {
       nombre: sitio.siteName,
@@ -219,6 +334,7 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
       localidad: sitio.location,
       afterParty: sitio.afterPartyName,
       seo: { titulo: sitio.seoTitle, descripcion: sitio.seoDescription },
+      imagenCompartir: imagen(sitio.imagenes, "compartir en redes", { formato: "JPEG" }),
     },
     contacto: borrador.contacto
       .filter((canal) => canal.isActive)
@@ -247,17 +363,23 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
       cifras: hero.figures
         .filter((cifra) => cifra.isVisible)
         .map((cifra) => ({ etiqueta: cifra.label, valor: cifra.value, pie: cifra.caption })),
+      imagen: imagen(hero.imagenes, "la portada"),
     },
     familia:
       bloqueFamilia?.isVisible && familia
         ? {
             indice: bloqueFamilia.indexLabel,
             titulo: familia.title,
-            segundaGeneracion: { etiqueta: familia.secondGenerationLabel, texto: familia.secondGenerationText },
+            segundaGeneracion: {
+              etiqueta: familia.secondGenerationLabel,
+              texto: familia.secondGenerationText,
+              imagen: imagen(familia.imagenes, "la segunda generación", { orden: HUECOS.familia.segunda }),
+            },
             terceraGeneracion: {
               etiqueta: familia.thirdGenerationLabel,
               texto: familia.thirdGenerationText,
               pie: familia.thirdGenerationCaption,
+              imagen: imagen(familia.imagenes, "la 3ª Generación", { orden: HUECOS.familia.tercera }),
             },
             miembros: familia.members
               .filter((miembro) => miembro.isVisible)
@@ -267,6 +389,7 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
                 texto: miembro.text,
                 pie: miembro.caption,
                 edad: miembro.ageManual,
+                foto: imagen(miembro.imagenes, miembro.name),
               })),
           }
         : null,
@@ -282,9 +405,20 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
               texto: dia.northText,
               destacado: dia.northHighlight,
               puente: dia.northBridge,
+              imagen: imagen(dia.imagenes, "el Campo Norte", { orden: HUECOS.dia.norte }),
             },
-            sur: { etiqueta: dia.southLabel, titulo: dia.southTitle, texto: dia.southText },
-            despues: { etiqueta: dia.afterLabel, titulo: dia.afterTitle, texto: dia.afterText },
+            sur: {
+              etiqueta: dia.southLabel,
+              titulo: dia.southTitle,
+              texto: dia.southText,
+              imagen: imagen(dia.imagenes, "el Campo Sur", { orden: HUECOS.dia.sur }),
+            },
+            despues: {
+              etiqueta: dia.afterLabel,
+              titulo: dia.afterTitle,
+              texto: dia.afterText,
+              imagen: imagen(dia.imagenes, "después del 18", { orden: HUECOS.dia.despues }),
+            },
             recorrido: dia.steps
               .filter((paso) => paso.isVisible)
               .map((paso) => ({ etiqueta: paso.label, hora: paso.time })),
@@ -317,6 +451,7 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
               estado: oportunidad.showStatusPublicly ? oportunidad.availability : null,
               hoyo: oportunidad.holeNumber,
             })),
+          imagen: imagen(via.imagenes, `la vía «${via.title}»`),
         })),
       concursos: {
         etiqueta: colaborar.holesLabel,
@@ -356,6 +491,10 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
                 categoria: patrocinador.category,
                 url: patrocinador.url,
                 descripcion: patrocinador.shortDescription,
+                logo: imagen(patrocinador.imagenes, `el logo de ${patrocinador.name}`, {
+                  esLogo: true,
+                  permisoLogo: patrocinador.logoPermission ?? "PENDIENTE",
+                }),
               })),
             },
             solidaria: cierre.charityVisible ? { titulo: cierre.charityTitle, texto: cierre.charityText } : null,
@@ -364,27 +503,49 @@ export function construirSnapshot(borrador: Borrador): SnapshotPublico {
             texto: cierre.closingText,
             microcopy: cierre.closingMicrocopy,
             cta: cierre.closingCtaLabel,
+            imagen: imagen(cierre.imagenes, "el cierre"),
           }
         : null,
   };
+
+  return { snapshot, avisos, medios: [...medios] };
+}
+
+/** Construye el objeto público, sin validar. Lanza ErrorPublicacion si falta algo imprescindible. */
+export function construirSnapshot(borrador: Borrador): SnapshotPublico {
+  return construirSnapshotDetallado(borrador).snapshot;
 }
 
 /**
  * Construye (lista blanca), valida con Zod (objetos estrictos) e inspecciona el resultado en busca de datos
  * privados. Es lo que usa la publicación: si cualquiera de las tres barreras falla, no se publica nada.
  */
-export function prepararSnapshot(borrador: Borrador): SnapshotPublico {
-  const resultado = esquemaSnapshot.safeParse(construirSnapshot(borrador));
-  if (!resultado.success) {
+export function prepararPublicacion(borrador: Borrador): ResultadoConstruccion {
+  const resultado = construirSnapshotDetallado(borrador);
+  const lectura = esquemaSnapshot.safeParse(resultado.snapshot);
+  if (!lectura.success) {
     throw new ErrorPublicacion(
-      resultado.error.issues.map(
-        (problema) => `${problema.path.map(String).join(".") || "snapshot"}: ${problema.message}`,
-      ),
+      lectura.error.issues.map((problema) => {
+        const ruta = problema.path.map(String).join(" › ") || "snapshot";
+        const motivo =
+          problema.code === "too_small"
+            ? "está vacío"
+            : problema.code === "invalid_type"
+              ? "falta o no es válido"
+              : problema.code === "unrecognized_keys"
+                ? "tiene campos no previstos"
+                : problema.message;
+        return `${ruta}: ${motivo}`;
+      }),
     );
   }
-  const hallazgos = buscarDatosPrivados(resultado.data);
+  const hallazgos = buscarDatosPrivados(lectura.data);
   if (hallazgos.length > 0) {
     throw new ErrorPublicacion(hallazgos.map((hallazgo) => `${hallazgo.ruta}: ${hallazgo.motivo}`));
   }
-  return resultado.data;
+  return { ...resultado, snapshot: lectura.data };
+}
+
+export function prepararSnapshot(borrador: Borrador): SnapshotPublico {
+  return prepararPublicacion(borrador).snapshot;
 }
